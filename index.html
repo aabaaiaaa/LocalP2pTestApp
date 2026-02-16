@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>P2P Connect</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body data-state="home">
+
+    <!-- HOME -->
+    <section id="view-home" class="view">
+        <h1>P2P Connect</h1>
+        <p class="subtitle">Connect two devices directly using QR codes. No server required.</p>
+        <div class="button-group">
+            <button id="btn-create" class="btn primary">Create Connection</button>
+            <button id="btn-join" class="btn secondary">Join Connection</button>
+        </div>
+    </section>
+
+    <!-- CREATING OFFER -->
+    <section id="view-creating-offer" class="view">
+        <div class="spinner"></div>
+        <p>Creating connection offer...</p>
+        <p class="hint" id="ice-status">Gathering network candidates...</p>
+    </section>
+
+    <!-- SHOW OFFER QR -->
+    <section id="view-show-offer-qr" class="view">
+        <h2>Show this to the other device</h2>
+        <div id="qr-offer" class="qr-container"></div>
+        <p class="hint">Other device: tap "Join Connection" and scan this code</p>
+        <button id="btn-scan-answer" class="btn primary">Scan their response</button>
+    </section>
+
+    <!-- SCAN OFFER (Joiner) -->
+    <section id="view-scan-offer" class="view">
+        <h2>Scan the offer QR code</h2>
+        <div id="scanner-offer" class="scanner-container"></div>
+        <button id="btn-cancel-scan-offer" class="btn secondary">Cancel</button>
+    </section>
+
+    <!-- CREATING ANSWER -->
+    <section id="view-creating-answer" class="view">
+        <div class="spinner"></div>
+        <p>Creating response...</p>
+    </section>
+
+    <!-- SHOW ANSWER QR -->
+    <section id="view-show-answer-qr" class="view">
+        <h2>Show this to the first device</h2>
+        <div id="qr-answer" class="qr-container"></div>
+        <p class="hint">First device: tap "Scan their response"</p>
+    </section>
+
+    <!-- SCAN ANSWER (Offerer) -->
+    <section id="view-scan-answer" class="view">
+        <h2>Scan the response QR code</h2>
+        <div id="scanner-answer" class="scanner-container"></div>
+        <button id="btn-cancel-scan-answer" class="btn secondary">Cancel</button>
+    </section>
+
+    <!-- CONNECTING -->
+    <section id="view-connecting" class="view">
+        <div class="spinner"></div>
+        <p>Establishing connection...</p>
+    </section>
+
+    <!-- CONNECTED -->
+    <section id="view-connected" class="view connected-view">
+        <div class="conn-header">
+            <span class="conn-indicator" id="conn-indicator"></span>
+            <span id="conn-status">Connected</span>
+            <button id="btn-disconnect" class="btn-icon" title="Disconnect">&#x2715;</button>
+        </div>
+
+        <div class="tab-bar">
+            <button class="tab active" data-tab="messages">Messages</button>
+            <button class="tab" data-tab="files">Files</button>
+            <button class="tab" data-tab="speed">Speed Test</button>
+            <button class="tab" data-tab="media">Media</button>
+        </div>
+
+        <!-- Messages Tab -->
+        <div id="tab-messages" class="tab-content active">
+            <div id="message-log" class="message-log"></div>
+            <div class="input-bar">
+                <input type="text" id="msg-input" placeholder="Type a message..." autocomplete="off">
+                <button id="btn-send-msg" class="btn primary small">Send</button>
+            </div>
+        </div>
+
+        <!-- Files Tab -->
+        <div id="tab-files" class="tab-content">
+            <div class="file-controls">
+                <label class="btn secondary file-label">
+                    Choose File to Send
+                    <input type="file" id="file-input" hidden>
+                </label>
+            </div>
+            <div id="file-progress" class="file-progress hidden">
+                <p id="file-status"></p>
+                <div class="progress-bar"><div class="progress-fill" id="file-progress-fill"></div></div>
+            </div>
+            <div id="received-files" class="received-files"></div>
+        </div>
+
+        <!-- Speed Test Tab -->
+        <div id="tab-speed" class="tab-content">
+            <div class="speed-controls">
+                <button id="btn-quick-test" class="btn primary">Quick Test (1 MB)</button>
+                <button id="btn-full-test" class="btn secondary">Full Test Suite</button>
+            </div>
+            <div id="speed-status" class="speed-status hidden"></div>
+            <div id="speed-results" class="speed-results"></div>
+        </div>
+
+        <!-- Media Tab -->
+        <div id="tab-media" class="tab-content">
+            <div class="media-controls">
+                <button id="btn-start-video" class="btn primary">Start Video</button>
+                <button id="btn-start-audio" class="btn secondary">Audio Only</button>
+                <button id="btn-stop-media" class="btn danger hidden">Stop</button>
+            </div>
+            <div class="media-streams">
+                <div class="video-wrapper">
+                    <video id="local-video" autoplay muted playsinline></video>
+                    <span class="video-label">You</span>
+                </div>
+                <div class="video-wrapper">
+                    <video id="remote-video" autoplay playsinline></video>
+                    <span class="video-label">Peer</span>
+                </div>
+            </div>
+            <div id="media-stats" class="media-stats hidden">
+                <div class="stat-row">
+                    <span class="stat-label">Resolution</span>
+                    <span class="stat-value" id="stat-resolution">--</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Framerate</span>
+                    <span class="stat-value" id="stat-framerate">--</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Video bitrate</span>
+                    <span class="stat-value" id="stat-video-bitrate">--</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Audio bitrate</span>
+                    <span class="stat-value" id="stat-audio-bitrate">--</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Packets lost</span>
+                    <span class="stat-value" id="stat-packets-lost">--</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Jitter</span>
+                    <span class="stat-value" id="stat-jitter">--</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Round-trip time</span>
+                    <span class="stat-value" id="stat-rtt">--</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ERROR -->
+    <section id="view-error" class="view">
+        <h2>Something went wrong</h2>
+        <p id="error-message" class="error-text"></p>
+        <button id="btn-retry" class="btn primary">Try Again</button>
+    </section>
+
+    <!-- CDN Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+    <!-- App modules -->
+    <script src="signal.js"></script>
+    <script src="qr.js"></script>
+    <script src="peer.js"></script>
+    <script src="speedtest.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
