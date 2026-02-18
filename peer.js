@@ -135,7 +135,13 @@ const Peer = {
 
     _handleMessage(event) {
         if (typeof event.data === 'string') {
-            const msg = JSON.parse(event.data);
+            let msg;
+            try {
+                msg = JSON.parse(event.data);
+            } catch (e) {
+                console.warn('Received malformed message:', e);
+                return;
+            }
             switch (msg.type) {
                 case 'text':
                     if (Peer.onMessage) Peer.onMessage(msg.data);
@@ -217,12 +223,16 @@ const Peer = {
     async sendFile(file) {
         if (!Peer._dc || Peer._dc.readyState !== 'open') throw new Error('Not connected');
 
-        Peer._send(JSON.stringify({ type: 'file-meta', name: file.name, size: file.size, mimeType: file.type || 'application/octet-stream' }));
+        if (!Peer._send(JSON.stringify({ type: 'file-meta', name: file.name, size: file.size, mimeType: file.type || 'application/octet-stream' }))) {
+            throw new Error('Failed to send file metadata — channel closed');
+        }
 
         const buffer = await file.arrayBuffer();
         await Peer._sendBuffer(buffer);
 
-        Peer._send(JSON.stringify({ type: 'file-end' }));
+        if (!Peer._send(JSON.stringify({ type: 'file-end' }))) {
+            throw new Error('Failed to send file-end marker — channel closed');
+        }
     },
 
     // === SPEED TEST ===
@@ -230,7 +240,9 @@ const Peer = {
     async sendSpeedTest(sizeBytes) {
         if (!Peer._dc || Peer._dc.readyState !== 'open') throw new Error('Not connected');
 
-        Peer._send(JSON.stringify({ type: 'speed-start', size: sizeBytes }));
+        if (!Peer._send(JSON.stringify({ type: 'speed-start', size: sizeBytes }))) {
+            throw new Error('Failed to start speed test — channel closed');
+        }
 
         const buffer = new ArrayBuffer(sizeBytes);
         // Fill with random-ish data to prevent compression cheating
@@ -249,25 +261,48 @@ const Peer = {
     // === SHARED BUFFER SENDING WITH BACKPRESSURE ===
 
     _sendBuffer(buffer) {
-        return new Promise((resolve) => {
+        return new Promise((resolve, reject) => {
             const dc = Peer._dc;
             let offset = 0;
 
+            const onClose = () => {
+                cleanup();
+                reject(new Error('Data channel closed during transfer'));
+            };
+
+            const cleanup = () => {
+                dc.removeEventListener('close', onClose);
+                dc.onbufferedamountlow = null;
+            };
+
+            dc.addEventListener('close', onClose);
+
             const sendChunks = () => {
-                while (offset < buffer.byteLength) {
-                    if (dc.bufferedAmount > 65536) {
-                        dc.onbufferedamountlow = () => {
-                            dc.onbufferedamountlow = null;
-                            sendChunks();
-                        };
-                        dc.bufferedAmountLowThreshold = 16384;
-                        return;
+                try {
+                    while (offset < buffer.byteLength) {
+                        if (dc.readyState !== 'open') {
+                            cleanup();
+                            reject(new Error('Data channel closed during transfer'));
+                            return;
+                        }
+                        if (dc.bufferedAmount > 65536) {
+                            dc.onbufferedamountlow = () => {
+                                dc.onbufferedamountlow = null;
+                                sendChunks();
+                            };
+                            dc.bufferedAmountLowThreshold = 16384;
+                            return;
+                        }
+                        const end = Math.min(offset + Peer.CHUNK_SIZE, buffer.byteLength);
+                        dc.send(buffer.slice(offset, end));
+                        offset = end;
                     }
-                    const end = Math.min(offset + Peer.CHUNK_SIZE, buffer.byteLength);
-                    dc.send(buffer.slice(offset, end));
-                    offset = end;
+                    cleanup();
+                    resolve();
+                } catch (err) {
+                    cleanup();
+                    reject(err);
                 }
-                resolve();
             };
 
             sendChunks();
@@ -289,6 +324,7 @@ const Peer = {
                 Peer._send(JSON.stringify({ type: 'renegotiate-offer', sdp: Peer._pc.localDescription.sdp }));
             } catch (err) {
                 console.error('Renegotiation offer failed:', err);
+                Peer._renegotiating = false;
             }
         };
     },
@@ -402,17 +438,20 @@ const Peer = {
 
     // === HEARTBEAT ===
 
+    _heartbeatState: 'connected',
+
     _startHeartbeat() {
         Peer._lastPeerHeartbeat = Date.now();
+        Peer._heartbeatState = 'connected';
 
         Peer._heartbeatInterval = setInterval(() => {
             Peer._send(JSON.stringify({ type: 'heartbeat' }));
 
             const silent = Date.now() - Peer._lastPeerHeartbeat;
-            if (silent > Peer.HEARTBEAT_TIMEOUT) {
-                if (Peer.onStateChange) Peer.onStateChange('unresponsive');
-            } else {
-                if (Peer.onStateChange) Peer.onStateChange('connected');
+            const newState = silent > Peer.HEARTBEAT_TIMEOUT ? 'unresponsive' : 'connected';
+            if (newState !== Peer._heartbeatState) {
+                Peer._heartbeatState = newState;
+                if (Peer.onStateChange) Peer.onStateChange(newState);
             }
         }, Peer.HEARTBEAT_INTERVAL);
     },
@@ -434,5 +473,6 @@ const Peer = {
         Peer._incomingFile = null;
         Peer._speedTestActive = false;
         Peer._renegotiating = false;
+        Peer._heartbeatState = 'connected';
     }
 };

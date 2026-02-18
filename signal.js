@@ -36,7 +36,7 @@ const Signal = {
         for (const line of lines) {
             if (line.startsWith('a=ice-ufrag:')) data.ufrag = line.slice(12);
             else if (line.startsWith('a=ice-pwd:')) data.pwd = line.slice(10);
-            else if (line.startsWith('a=fingerprint:sha-256 ')) data.fp = line.slice(22);
+            else if (line.startsWith('a=fingerprint:')) data.fp = line.slice(14);
             else if (line.startsWith('a=setup:')) data.setup = line.slice(8);
             else if (line.startsWith('a=candidate:')) data.candidates.push(line.slice(12));
         }
@@ -64,7 +64,7 @@ const Signal = {
             'a=ice-ufrag:' + data.ufrag,
             'a=ice-pwd:' + data.pwd,
             'a=ice-options:trickle',
-            'a=fingerprint:sha-256 ' + data.fp,
+            'a=fingerprint:' + data.fp,
             'a=setup:' + data.setup,
             'a=mid:0',
             'a=sctp-port:5000',

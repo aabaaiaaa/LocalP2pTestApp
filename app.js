@@ -2,6 +2,7 @@
 
 const App = {
     role: null,
+    _blobUrls: [],
 
     init() {
         // Home
@@ -173,6 +174,8 @@ const App = {
             fill.style.width = '100%';
         } catch (err) {
             status.textContent = 'Failed: ' + err.message;
+            fill.style.width = '0%';
+            setTimeout(() => progress.classList.add('hidden'), 3000);
         }
 
         event.target.value = '';
@@ -198,7 +201,9 @@ const App = {
 
         const container = document.getElementById('received-files');
         const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
+        const blobUrl = URL.createObjectURL(blob);
+        App._blobUrls.push(blobUrl);
+        link.href = blobUrl;
         link.download = name;
         link.className = 'file-download';
         link.textContent = name + ' (' + App.formatBytes(blob.size) + ')';
@@ -268,6 +273,8 @@ const App = {
         QR.stopScanner();
         Peer.close();
         App.role = null;
+        App._blobUrls.forEach(url => URL.revokeObjectURL(url));
+        App._blobUrls = [];
         document.getElementById('message-log').innerHTML = '';
         document.getElementById('received-files').innerHTML = '';
         document.getElementById('speed-results').innerHTML = '';

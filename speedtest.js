@@ -110,8 +110,8 @@ const SpeedTest = {
         const view = new Uint32Array(chunk);
         for (let i = 0; i < view.length; i++) view[i] = (Math.random() * 0xFFFFFFFF) >>> 0;
 
-        // Notify receiver
-        Peer._send(JSON.stringify({ type: 'speed-start', size: 0 })); // size 0 = unknown/sustained
+        // Notify receiver (size -1 = sustained/unknown length)
+        Peer._send(JSON.stringify({ type: 'speed-start', size: -1 }));
 
         const start = performance.now();
         let totalSent = 0;
@@ -155,7 +155,22 @@ const SpeedTest = {
         const container = document.getElementById('speed-results');
         const card = document.createElement('div');
         card.className = 'speed-card ' + state;
-        card.innerHTML = '<div class="label">' + label + '</div><div class="value">' + value + '<span class="unit">' + unit + '</span></div>';
+
+        const labelEl = document.createElement('div');
+        labelEl.className = 'label';
+        labelEl.textContent = label;
+
+        const valueEl = document.createElement('div');
+        valueEl.className = 'value';
+        valueEl.textContent = value;
+
+        const unitEl = document.createElement('span');
+        unitEl.className = 'unit';
+        unitEl.textContent = unit;
+        valueEl.appendChild(unitEl);
+
+        card.appendChild(labelEl);
+        card.appendChild(valueEl);
         container.appendChild(card);
     },
 
@@ -163,7 +178,13 @@ const SpeedTest = {
         const cards = document.querySelectorAll('.speed-card');
         if (cards[index]) {
             cards[index].className = 'speed-card ' + state;
-            cards[index].querySelector('.value').innerHTML = value + '<span class="unit">' + unit + '</span>';
+            const valueEl = cards[index].querySelector('.value');
+            const unitEl = valueEl.querySelector('.unit');
+            valueEl.textContent = value;
+            const newUnit = document.createElement('span');
+            newUnit.className = 'unit';
+            newUnit.textContent = unit;
+            valueEl.appendChild(newUnit);
         }
     }
 };
