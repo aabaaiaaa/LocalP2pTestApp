@@ -196,6 +196,14 @@ h2 { font-size: 1.25rem; font-weight: 600; }
 }
 .peer-chip .conn-indicator.warning { background: var(--warning); }
 .peer-chip .conn-indicator.disconnected { background: var(--danger); }
+.peer-chip .conn-indicator.reconnecting {
+    background: var(--warning);
+    animation: pulse-reconnecting 1.2s ease-in-out infinite;
+}
+@keyframes pulse-reconnecting {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.4; transform: scale(1.3); }
+}
 
 /* Tabs */
 .tab-bar {
@@ -857,6 +865,33 @@ h2 { font-size: 1.25rem; font-weight: 600; }
 .message.image-message {
     padding: 4px;
     overflow: hidden;
+}
+
+/* Reconnect prompt on home screen */
+.reconnect-prompt {
+    background: var(--surface);
+    border: 1px solid var(--warning);
+    border-radius: var(--radius);
+    padding: 20px;
+    width: 100%;
+    max-width: 280px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    text-align: center;
+}
+.reconnect-prompt p:first-child {
+    font-weight: 600;
+    color: var(--warning);
+}
+.reconnect-prompt .btn { width: 100%; }
+
+/* Reconnect countdown in modal */
+.reconnect-countdown {
+    color: var(--text-muted);
+    font-size: 0.875rem;
+    font-variant-numeric: tabular-nums;
 }
 
 /* Utilities */

@@ -20,6 +20,12 @@
             <button id="btn-create" class="btn primary">Create Connection</button>
             <button id="btn-join" class="btn secondary">Join Connection</button>
         </div>
+        <div id="reconnect-prompt" class="reconnect-prompt hidden">
+            <p>Previous session found</p>
+            <p class="hint" id="reconnect-peers-hint"></p>
+            <button id="btn-reconnect" class="btn primary">Reconnect</button>
+            <button id="btn-reconnect-dismiss" class="btn secondary small">Start Fresh</button>
+        </div>
     </section>
 
     <!-- CREATING OFFER -->
@@ -585,6 +591,13 @@
                 <div id="modal-connecting" class="modal-step hidden">
                     <div class="spinner"></div>
                     <p>Connecting...</p>
+                </div>
+                <div id="modal-reconnect" class="modal-step hidden">
+                    <p id="modal-reconnect-peer-name"></p>
+                    <div id="modal-reconnect-qr" class="qr-container"></div>
+                    <p class="reconnect-countdown" id="modal-reconnect-countdown"></p>
+                    <button id="modal-btn-reconnect-scan" class="btn primary">Scan their response</button>
+                    <button id="modal-btn-reconnect-cancel" class="btn secondary small">Give up</button>
                 </div>
             </div>
         </div>

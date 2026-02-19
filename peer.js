@@ -262,6 +262,9 @@ class PeerConnection {
                 case 'renegotiate-answer':
                     this._handleRenegotiateAnswer(msg.sdp);
                     break;
+                case 'goodbye':
+                    this.callbacks.onGoodbye(this.peerId);
+                    break;
                 default: {
                     const handler = this._messageHandlers.get(msg.type);
                     if (handler) {
@@ -646,11 +649,12 @@ const PeerManager = {
     onTyping: null,
     onPeerJoined: null,
     onPeerLeft: null,
+    onGoodbye: null,
     onDataChannel: null,
 
-    init(name) {
-        PeerManager._localId = PeerManager._generateId();
-        PeerManager._localName = name || PeerManager._generateName();
+    init(name, savedId, savedName) {
+        PeerManager._localId = savedId || PeerManager._generateId();
+        PeerManager._localName = savedName || name || PeerManager._generateName();
         console.log('PeerManager init:', PeerManager._localId, PeerManager._localName);
     },
 
@@ -683,6 +687,7 @@ const PeerManager = {
             onRemoteStream: (peerId, stream) => { if (PeerManager.onRemoteStream) PeerManager.onRemoteStream(peerId, stream); },
             onMediaStats: (peerId, stats) => { if (PeerManager.onMediaStats) PeerManager.onMediaStats(peerId, stats); },
             onTyping: (peerId, isTyping) => { if (PeerManager.onTyping) PeerManager.onTyping(peerId, isTyping); },
+            onGoodbye: (peerId) => { if (PeerManager.onGoodbye) PeerManager.onGoodbye(peerId); },
         };
     },
 
@@ -871,6 +876,13 @@ const PeerManager = {
     broadcastTyping(isTyping) {
         for (const conn of PeerManager._connections.values()) {
             conn.sendTyping(isTyping);
+        }
+    },
+
+    broadcastGoodbye() {
+        const data = JSON.stringify({ type: 'goodbye' });
+        for (const conn of PeerManager._connections.values()) {
+            conn._send(data);
         }
     },
 
