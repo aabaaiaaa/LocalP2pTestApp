@@ -79,6 +79,7 @@ const App = {
     },
 
     async scanAnswer() {
+        QR.stopDisplay();
         App.setState('scan-answer');
         try {
             const data = await QR.scan('scanner-answer');
@@ -270,6 +271,7 @@ const App = {
     },
 
     reset() {
+        QR.stopDisplay();
         QR.stopScanner();
         Peer.close();
         App.role = null;
