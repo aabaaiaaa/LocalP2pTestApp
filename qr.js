@@ -1,54 +1,49 @@
-// qr.js — QR code generation (with multi-part for iOS) and scanning wrapper
+// qr.js — QR code generation (with multi-part fallback) and scanning wrapper
 
 const QR = {
     _scanner: null,
     _cycleTimer: null,
     _currentChunks: [],
     _currentIndex: 0,
-    _isIOS: /iPad|iPhone|iPod/.test(navigator.userAgent),
 
-    CHUNK_MAX: 800,
+    CHUNK_MAX: 300,
 
     generate(containerId, data) {
         const container = document.getElementById(containerId);
         container.innerHTML = '';
 
-        // Always render the full single QR code
-        QR._renderQR(container, data, 280);
+        // Always render the full single QR code at a large size for easy scanning
+        QR._renderQR(container, data, 360);
 
-        // If data is large enough, also show multi-part QR codes below
-        if (data.length > QR.CHUNK_MAX) {
-            const chunks = QR._splitIntoChunks(data);
-            QR._currentChunks = chunks;
-            QR._currentIndex = 0;
+        // Always show multi-part QR codes below for devices with weaker cameras
+        const chunks = QR._splitIntoChunks(data);
+        QR._currentChunks = chunks;
+        QR._currentIndex = 0;
 
-            const section = document.createElement('div');
-            section.className = 'qr-multi-section';
-            section.id = containerId + '-multi';
+        const section = document.createElement('div');
+        section.className = 'qr-multi-section';
+        section.id = containerId + '-multi';
 
-            const label = document.createElement('p');
-            label.className = 'qr-multi-label' + (QR._isIOS ? ' ios-detected' : '');
-            label.textContent = QR._isIOS
-                ? 'iPhone detected — scan these smaller QR codes instead'
-                : 'iPhone users: scan these smaller codes';
-            section.appendChild(label);
+        const label = document.createElement('p');
+        label.className = 'qr-multi-label';
+        label.textContent = 'Having trouble scanning? Use these smaller QR codes instead';
+        section.appendChild(label);
 
-            const miniContainer = document.createElement('div');
-            miniContainer.className = 'qr-mini-container';
-            miniContainer.id = containerId + '-mini';
-            section.appendChild(miniContainer);
+        const miniContainer = document.createElement('div');
+        miniContainer.className = 'qr-mini-container';
+        miniContainer.id = containerId + '-mini';
+        section.appendChild(miniContainer);
 
-            const counter = document.createElement('p');
-            counter.className = 'qr-counter';
-            counter.id = containerId + '-counter';
-            counter.textContent = 'QR 1 of ' + chunks.length;
-            section.appendChild(counter);
+        const counter = document.createElement('p');
+        counter.className = 'qr-counter';
+        counter.id = containerId + '-counter';
+        counter.textContent = 'QR 1 of ' + chunks.length;
+        section.appendChild(counter);
 
-            container.parentNode.insertBefore(section, container.nextSibling);
+        container.parentNode.insertBefore(section, container.nextSibling);
 
-            QR._renderQR(miniContainer, chunks[0], 240);
-            QR._startCycleTimer(containerId);
-        }
+        QR._renderQR(miniContainer, chunks[0], 360);
+        QR._startCycleTimer(containerId);
     },
 
     _splitIntoChunks(data) {
@@ -64,7 +59,10 @@ const QR = {
         }
 
         const total = chunks.length;
-        return chunks.map((chunk, idx) => (idx + 1) + '/' + total + ':' + chunk);
+        const prefixed = chunks.map((chunk, idx) => (idx + 1) + '/' + total + ':' + chunk);
+        // Pad all chunks to the same length so QR codes use the same version/density
+        const maxLen = Math.max(...prefixed.map(c => c.length));
+        return prefixed.map(c => c.padEnd(maxLen));
     },
 
     _renderQR(element, text, size) {
@@ -99,7 +97,7 @@ const QR = {
         if (!miniContainer || !counter) return;
 
         miniContainer.innerHTML = '';
-        QR._renderQR(miniContainer, QR._currentChunks[QR._currentIndex], 240);
+        QR._renderQR(miniContainer, QR._currentChunks[QR._currentIndex], 360);
         counter.textContent = 'QR ' + (QR._currentIndex + 1) + ' of ' + QR._currentChunks.length;
     },
 
@@ -109,22 +107,13 @@ const QR = {
         return {
             partNum: parseInt(match[1], 10),
             totalParts: parseInt(match[2], 10),
-            data: match[3]
+            data: match[3].trimEnd()
         };
     },
 
     scan(containerId) {
         return new Promise((resolve, reject) => {
             const container = document.getElementById(containerId);
-
-            // On iOS, show a hint about multi-part scanning
-            if (QR._isIOS) {
-                const hint = document.createElement('p');
-                hint.className = 'qr-scan-hint';
-                hint.id = containerId + '-hint';
-                hint.textContent = 'Multiple QR codes may be needed — keep scanning';
-                container.parentNode.insertBefore(hint, container);
-            }
 
             const scanner = new Html5Qrcode(containerId);
             QR._scanner = scanner;

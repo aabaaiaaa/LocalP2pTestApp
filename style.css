@@ -383,7 +383,7 @@ h2 { font-size: 1.25rem; font-weight: 600; }
 .stat-label { color: var(--text-muted); }
 .stat-value { font-weight: 600; font-variant-numeric: tabular-nums; }
 
-/* Multi-QR section (iOS compatibility) */
+/* Multi-QR section (scanning fallback) */
 .qr-multi-section {
     margin-top: 16px;
     padding-top: 16px;
@@ -402,19 +402,19 @@ h2 { font-size: 1.25rem; font-weight: 600; }
     line-height: 1.4;
 }
 
-.qr-multi-label.ios-detected {
-    color: var(--warning);
-    font-weight: 600;
-    background: rgba(245, 158, 11, 0.1);
-    padding: 8px 14px;
-    border-radius: var(--radius-sm);
-}
-
 .qr-mini-container {
     background: #fff;
     padding: 12px;
     border-radius: var(--radius);
     display: inline-block;
+    width: 360px;
+    height: 360px;
+}
+
+.qr-mini-container img,
+.qr-mini-container canvas {
+    width: 100% !important;
+    height: 100% !important;
 }
 
 .qr-counter {
