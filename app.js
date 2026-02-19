@@ -19,6 +19,7 @@ const App = {
     init() {
         // Generate preview name
         PeerManager.init('');
+        IceConfig.init();
         document.getElementById('name-preview').textContent =
             'Default: ' + PeerManager._localName;
 

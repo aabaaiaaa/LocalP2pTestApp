@@ -129,8 +129,6 @@ const QR = {
 
     scan(containerId) {
         return new Promise((resolve, reject) => {
-            const container = document.getElementById(containerId);
-
             const scanner = new Html5Qrcode(containerId);
             QR._scanner = scanner;
 

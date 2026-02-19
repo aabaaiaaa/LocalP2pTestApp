@@ -897,6 +897,199 @@ h2 { font-size: 1.25rem; font-weight: 600; }
 /* Utilities */
 .hidden { display: none !important; }
 
+/* ICE Config Section */
+.ice-config-section {
+    width: 100%;
+    max-width: 280px;
+    background: var(--surface);
+    border-radius: var(--radius);
+    border: 1px solid var(--surface-alt);
+    overflow: hidden;
+}
+.ice-config-section > summary {
+    padding: 12px 16px;
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+    user-select: none;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.ice-config-section > summary::-webkit-details-marker { display: none; }
+.ice-config-section > summary::before {
+    content: '\25b6';
+    font-size: 0.625rem;
+    transition: transform 0.15s;
+}
+.ice-config-section[open] > summary::before { transform: rotate(90deg); }
+
+.ice-config-badge {
+    margin-left: auto;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: var(--surface-alt);
+    color: var(--text-muted);
+}
+.ice-config-badge.active {
+    background: rgba(34, 197, 94, 0.15);
+    color: var(--success);
+}
+
+.ice-config-body {
+    padding: 0 16px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.ice-config-note {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    line-height: 1.4;
+}
+
+.ice-config-hint {
+    font-size: 0.6875rem;
+    color: var(--text-muted);
+    line-height: 1.4;
+    background: var(--bg);
+    padding: 8px 10px;
+    border-radius: var(--radius-sm);
+}
+
+/* Toggle switch */
+.ice-toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+}
+
+.toggle-switch {
+    position: relative;
+    width: 48px;
+    height: 28px;
+    flex-shrink: 0;
+}
+.toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+    position: absolute;
+}
+.toggle-slider {
+    position: absolute;
+    inset: 0;
+    background: var(--surface-alt);
+    border-radius: 14px;
+    transition: background 0.2s;
+    cursor: pointer;
+}
+.toggle-slider::before {
+    content: '';
+    position: absolute;
+    left: 3px;
+    top: 3px;
+    width: 22px;
+    height: 22px;
+    background: #fff;
+    border-radius: 50%;
+    transition: transform 0.2s;
+}
+.toggle-switch input:checked + .toggle-slider {
+    background: var(--primary);
+}
+.toggle-switch input:checked + .toggle-slider::before {
+    transform: translateX(20px);
+}
+
+/* Custom servers subsection */
+.ice-custom-section {
+    border-top: 1px solid var(--surface-alt);
+    padding-top: 4px;
+}
+.ice-custom-section > summary {
+    padding: 8px 0;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    cursor: pointer;
+    user-select: none;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-muted);
+}
+.ice-custom-section > summary::-webkit-details-marker { display: none; }
+.ice-custom-section > summary::before {
+    content: '\25b6';
+    font-size: 0.5rem;
+    transition: transform 0.15s;
+}
+.ice-custom-section[open] > summary::before { transform: rotate(90deg); }
+
+.ice-custom-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-bottom: 4px;
+}
+
+.ice-custom-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.ice-custom-list:empty { display: none; }
+
+.ice-custom-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
+    background: var(--bg);
+    border-radius: var(--radius-sm);
+}
+.ice-custom-url {
+    flex: 1;
+    font-family: 'SF Mono', 'Consolas', monospace;
+    font-size: 0.6875rem;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-muted);
+}
+.ice-custom-remove {
+    font-size: 0.75rem;
+    padding: 2px 4px;
+    flex-shrink: 0;
+}
+
+.ice-custom-form {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.ice-custom-form input {
+    padding: 8px 10px;
+    border: 1px solid var(--surface-alt);
+    border-radius: var(--radius-sm);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 0.8125rem;
+    outline: none;
+    width: 100%;
+}
+.ice-custom-form input:focus { border-color: var(--primary); }
+.ice-custom-form .btn { width: 100%; }
+
 /* Scrollbar styling */
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }

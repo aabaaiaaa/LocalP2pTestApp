@@ -16,6 +16,40 @@
             <input type="text" id="device-name" placeholder="Your name (optional)" autocomplete="off">
             <p class="hint" id="name-preview"></p>
         </div>
+        <details class="ice-config-section">
+            <summary>
+                <span>Network Settings</span>
+                <span class="ice-config-badge" id="ice-config-badge">LAN only</span>
+            </summary>
+            <div class="ice-config-body">
+                <p class="ice-config-note">No setup needed if both devices are on the same WiFi. Enable remote connections to connect across different networks.</p>
+
+                <label class="ice-toggle-row">
+                    <span>Enable remote connections</span>
+                    <span class="toggle-switch">
+                        <input type="checkbox" id="ice-remote-toggle">
+                        <span class="toggle-slider"></span>
+                    </span>
+                </label>
+
+                <p class="ice-config-hint hidden" id="ice-remote-hint">Uses free Google STUN and Open Relay TURN servers to connect across the internet. STUN discovers your public address. TURN relays traffic when direct connections are blocked.</p>
+
+                <details class="ice-custom-section">
+                    <summary>Custom servers</summary>
+                    <div class="ice-custom-body">
+                        <p class="ice-config-hint">Add your own STUN or TURN servers. TURN servers require a username and credential. Format: stun:host:port or turn:host:port</p>
+                        <div id="ice-custom-list" class="ice-custom-list"></div>
+                        <div class="ice-custom-form">
+                            <input type="text" id="ice-custom-url" placeholder="stun:host:port or turn:host:port" autocomplete="off">
+                            <input type="text" id="ice-custom-username" placeholder="Username (TURN only)" autocomplete="off">
+                            <input type="text" id="ice-custom-credential" placeholder="Credential (TURN only)" autocomplete="off">
+                            <button id="btn-ice-add-server" class="btn secondary small">Add Server</button>
+                        </div>
+                    </div>
+                </details>
+            </div>
+        </details>
+
         <div class="button-group">
             <button id="btn-create" class="btn primary">Create Connection</button>
             <button id="btn-join" class="btn secondary">Join Connection</button>
@@ -624,6 +658,7 @@
     <script src="network-tests.js"></script>
     <script src="media-extended.js"></script>
     <script src="tools.js"></script>
+    <script src="ice-config.js"></script>
     <script src="app.js"></script>
 </body>
 </html>
