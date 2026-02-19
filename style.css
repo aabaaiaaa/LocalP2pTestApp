@@ -301,6 +301,9 @@ h2 { font-size: 1.25rem; font-weight: 600; }
     align-self: flex-start;
     max-width: 80%;
 }
+.message-group .message {
+    max-width: 100%;
+}
 .message-group.local {
     align-self: flex-end;
 }
