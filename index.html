@@ -82,8 +82,11 @@
             <button class="tab active" data-tab="messages">Messages</button>
             <button class="tab" data-tab="files">Files</button>
             <button class="tab" data-tab="speed">Speed Test</button>
+            <button class="tab" data-tab="datachannel">Data Channel</button>
             <button class="tab" data-tab="media">Media</button>
             <button class="tab" data-tab="network">Network</button>
+            <button class="tab" data-tab="stats">Stats</button>
+            <button class="tab" data-tab="tools">Tools</button>
         </div>
 
         <!-- Messages Tab -->
@@ -91,8 +94,21 @@
             <div id="message-log" class="message-log"></div>
             <div id="typing-indicator" class="typing-indicator hidden"></div>
             <div class="input-bar">
+                <button id="btn-camera" class="btn-icon" title="Take Photo">&#x1f4f7;</button>
                 <input type="text" id="msg-input" placeholder="Type a message..." autocomplete="off">
                 <button id="btn-send-msg" class="btn primary small">Send</button>
+            </div>
+            <div id="camera-overlay" class="camera-overlay hidden">
+                <div class="camera-header">
+                    <span>Take Photo</span>
+                    <button id="btn-camera-close" class="btn-icon">&#x2715;</button>
+                </div>
+                <video id="camera-preview" autoplay playsinline></video>
+                <canvas id="camera-canvas" class="hidden"></canvas>
+                <div class="camera-controls">
+                    <button id="btn-camera-switch" class="btn secondary small">Switch</button>
+                    <button id="btn-camera-capture" class="btn primary">Capture</button>
+                </div>
             </div>
         </div>
 
@@ -127,6 +143,92 @@
             </div>
             <div id="speed-status" class="speed-status hidden"></div>
             <div id="speed-results" class="speed-results"></div>
+        </div>
+
+        <!-- Data Channel Tab -->
+        <div id="tab-datachannel" class="tab-content">
+            <div class="peer-selector-bar">
+                <label>Test peer:</label>
+                <select id="dc-peer-select" class="peer-select"></select>
+            </div>
+
+            <details class="test-section">
+                <summary>Max Message Size</summary>
+                <div class="test-section-body">
+                    <p class="test-desc">Send increasingly large messages to find the maximum supported size.</p>
+                    <div class="test-controls-row">
+                        <button id="btn-dc-maxsize" class="btn primary">Run Test</button>
+                    </div>
+                    <div id="dc-maxsize-results" class="test-results"></div>
+                </div>
+            </details>
+
+            <details class="test-section">
+                <summary>Binary vs Text Throughput</summary>
+                <div class="test-section-body">
+                    <p class="test-desc">Compare throughput of binary (ArrayBuffer) vs text (JSON string) transfers.</p>
+                    <div class="test-controls-row">
+                        <button id="btn-dc-bintext" class="btn primary">Run Test</button>
+                    </div>
+                    <div id="dc-bintext-results" class="test-results"></div>
+                </div>
+            </details>
+
+            <details class="test-section">
+                <summary>Ordered vs Unordered</summary>
+                <div class="test-section-body">
+                    <p class="test-desc">Compare ordered and unordered data channels — see reordering and speed differences.</p>
+                    <div class="test-controls-row">
+                        <label>Messages:</label>
+                        <input type="number" id="dc-order-count" value="1000" min="100" max="10000">
+                        <button id="btn-dc-order" class="btn primary">Run Test</button>
+                    </div>
+                    <div id="dc-order-results" class="test-results"></div>
+                </div>
+            </details>
+
+            <details class="test-section">
+                <summary>Reliable vs Unreliable</summary>
+                <div class="test-section-body">
+                    <p class="test-desc">Compare reliable delivery vs unreliable (maxRetransmits=0) channels.</p>
+                    <div class="test-controls-row">
+                        <label>Messages:</label>
+                        <input type="number" id="dc-reliable-count" value="1000" min="100" max="10000">
+                        <button id="btn-dc-reliable" class="btn primary">Run Test</button>
+                    </div>
+                    <div id="dc-reliable-results" class="test-results"></div>
+                </div>
+            </details>
+
+            <details class="test-section">
+                <summary>Stress Test</summary>
+                <div class="test-section-body">
+                    <p class="test-desc">Flood messages at high rate and measure actual throughput and loss.</p>
+                    <div class="test-controls-row">
+                        <label>Msgs/sec:</label>
+                        <input type="number" id="dc-stress-rate" value="1000" min="100" max="50000">
+                        <label>Duration (s):</label>
+                        <input type="number" id="dc-stress-duration" value="5" min="1" max="30">
+                        <button id="btn-dc-stress" class="btn primary">Run Test</button>
+                    </div>
+                    <div id="dc-stress-results" class="test-results"></div>
+                </div>
+            </details>
+
+            <details class="test-section">
+                <summary>Concurrent Transfers</summary>
+                <div class="test-section-body">
+                    <p class="test-desc">Send multiple files on separate data channels simultaneously vs sequentially.</p>
+                    <div class="test-controls-row">
+                        <label class="btn secondary file-label" style="flex:none;">
+                            Choose Files
+                            <input type="file" id="dc-concurrent-files" hidden multiple>
+                        </label>
+                        <button id="btn-dc-concurrent" class="btn primary">Run Test</button>
+                    </div>
+                    <div id="dc-concurrent-results" class="test-results"></div>
+                </div>
+            </details>
         </div>
 
         <!-- Media Tab -->
@@ -177,6 +279,78 @@
                     <span class="stat-value" id="stat-rtt">--</span>
                 </div>
             </div>
+
+            <!-- Extended Media Features -->
+            <details class="test-section">
+                <summary>Codec Detection</summary>
+                <div class="test-section-body">
+                    <p class="test-desc">Detect supported audio and video codecs in this browser.</p>
+                    <div class="test-controls-row">
+                        <button id="btn-media-codecs" class="btn primary">Detect Codecs</button>
+                    </div>
+                    <div id="media-codec-results" class="test-results"></div>
+                </div>
+            </details>
+
+            <details class="test-section">
+                <summary>Screen Sharing</summary>
+                <div class="test-section-body">
+                    <p class="test-desc">Share your screen with the selected peer.</p>
+                    <div class="test-controls-row">
+                        <button id="btn-screen-share" class="btn primary">Start Screen Share</button>
+                        <button id="btn-screen-stop" class="btn danger hidden">Stop Sharing</button>
+                    </div>
+                </div>
+            </details>
+
+            <details class="test-section">
+                <summary>Audio Visualizer</summary>
+                <div class="test-section-body">
+                    <p class="test-desc">Visualize incoming audio as frequency bars (requires active audio stream).</p>
+                    <div class="test-controls-row">
+                        <button id="btn-audio-viz" class="btn primary">Start Visualizer</button>
+                        <button id="btn-audio-viz-stop" class="btn danger hidden">Stop</button>
+                    </div>
+                    <canvas id="audio-visualizer"></canvas>
+                </div>
+            </details>
+
+            <details class="test-section">
+                <summary>Recording</summary>
+                <div class="test-section-body">
+                    <p class="test-desc">Record the remote media stream to a downloadable file.</p>
+                    <div class="test-controls-row">
+                        <button id="btn-record-start" class="btn primary">Start Recording</button>
+                        <button id="btn-record-stop" class="btn danger hidden">Stop Recording</button>
+                    </div>
+                    <div id="recording-downloads"></div>
+                </div>
+            </details>
+
+            <details class="test-section">
+                <summary>Resolution Ladder</summary>
+                <div class="test-section-body">
+                    <p class="test-desc">Step through resolutions and measure actual quality at each step.</p>
+                    <div class="test-controls-row">
+                        <button id="btn-res-ladder" class="btn primary">Run Ladder Test</button>
+                    </div>
+                    <div id="res-ladder-results" class="test-results"></div>
+                </div>
+            </details>
+
+            <details class="test-section">
+                <summary>Bandwidth Adaptation</summary>
+                <div class="test-section-body">
+                    <p class="test-desc">Constrain video bitrate and observe adaptation.</p>
+                    <div class="test-controls-row">
+                        <label>Max bitrate (kbps):</label>
+                        <input type="number" id="bw-limit" value="500" min="50" max="10000">
+                        <button id="btn-bw-apply" class="btn primary">Apply</button>
+                        <button id="btn-bw-remove" class="btn secondary">Remove Limit</button>
+                    </div>
+                    <div id="bw-results" class="test-results"></div>
+                </div>
+            </details>
         </div>
 
         <!-- Network Tab -->
@@ -200,6 +374,174 @@
                     <tbody id="traffic-tbody"></tbody>
                 </table>
             </div>
+
+            <!-- Extended Network Tests -->
+            <details class="test-section">
+                <summary>ICE Candidate Inspector</summary>
+                <div class="test-section-body">
+                    <p class="test-desc">Gather and inspect local ICE candidates to see your network interfaces.</p>
+                    <div class="test-controls-row">
+                        <button id="btn-ice-gather" class="btn primary">Gather Candidates</button>
+                    </div>
+                    <div id="ice-candidates-results" class="test-results"></div>
+                </div>
+            </details>
+
+            <details class="test-section">
+                <summary>Connection Type Detection</summary>
+                <div class="test-section-body">
+                    <p class="test-desc">Detect connection type (direct/relay), protocol (UDP/TCP), and addresses for a peer.</p>
+                    <div class="test-controls-row">
+                        <label>Peer:</label>
+                        <select id="conntype-peer-select" class="peer-select"></select>
+                        <button id="btn-conntype" class="btn primary">Detect</button>
+                    </div>
+                    <div id="conntype-results" class="test-results"></div>
+                </div>
+            </details>
+
+            <details class="test-section">
+                <summary>STUN/TURN Testing</summary>
+                <div class="test-section-body">
+                    <p class="test-desc">Test reachability of STUN/TURN servers.</p>
+                    <div class="test-controls-row">
+                        <input type="text" id="stun-url" value="stun:stun.l.google.com:19302" style="width:200px;">
+                        <button id="btn-stun-test" class="btn primary">Test Server</button>
+                    </div>
+                    <div id="stun-results" class="test-results"></div>
+                </div>
+            </details>
+
+            <details class="test-section">
+                <summary>MTU Discovery</summary>
+                <div class="test-section-body">
+                    <p class="test-desc">Find the effective maximum transmission unit by sending increasing-size messages.</p>
+                    <div class="test-controls-row">
+                        <label>Peer:</label>
+                        <select id="mtu-peer-select" class="peer-select"></select>
+                        <button id="btn-mtu" class="btn primary">Discover MTU</button>
+                    </div>
+                    <div id="mtu-results" class="test-results"></div>
+                </div>
+            </details>
+
+            <details class="test-section">
+                <summary>ICE Restart Test</summary>
+                <div class="test-section-body">
+                    <p class="test-desc">Trigger an ICE restart and measure recovery time.</p>
+                    <div class="test-controls-row">
+                        <label>Peer:</label>
+                        <select id="restart-peer-select" class="peer-select"></select>
+                        <button id="btn-ice-restart" class="btn primary">Restart ICE</button>
+                    </div>
+                    <div id="restart-results" class="test-results"></div>
+                </div>
+            </details>
+
+            <details class="test-section">
+                <summary>Packet Loss / Jitter Simulation</summary>
+                <div class="test-section-body">
+                    <p class="test-desc">Simulate packet loss and jitter on incoming messages (local only).</p>
+                    <div class="test-controls-row">
+                        <label>Loss %:</label>
+                        <input type="number" id="sim-loss" value="10" min="0" max="100">
+                        <label>Jitter (ms):</label>
+                        <input type="number" id="sim-jitter" value="50" min="0" max="2000">
+                        <button id="btn-sim-enable" class="btn primary">Enable</button>
+                        <button id="btn-sim-disable" class="btn danger hidden">Disable</button>
+                    </div>
+                    <div id="sim-results" class="test-results"></div>
+                </div>
+            </details>
+        </div>
+
+        <!-- Stats Tab -->
+        <div id="tab-stats" class="tab-content">
+            <div class="peer-selector-bar">
+                <label>Peer:</label>
+                <select id="stats-peer-select" class="peer-select"></select>
+            </div>
+            <div class="stats-controls">
+                <button id="btn-stats-start" class="btn primary">Start</button>
+                <button id="btn-stats-stop" class="btn danger hidden">Stop</button>
+                <label><input type="checkbox" id="stats-autoscroll" checked> Auto-scroll</label>
+                <select id="stats-type-filter" class="stats-filter">
+                    <option value="">All Types</option>
+                    <option value="candidate-pair">candidate-pair</option>
+                    <option value="inbound-rtp">inbound-rtp</option>
+                    <option value="outbound-rtp">outbound-rtp</option>
+                    <option value="remote-inbound-rtp">remote-inbound-rtp</option>
+                    <option value="local-candidate">local-candidate</option>
+                    <option value="remote-candidate">remote-candidate</option>
+                    <option value="transport">transport</option>
+                    <option value="codec">codec</option>
+                    <option value="data-channel">data-channel</option>
+                </select>
+            </div>
+            <div id="stats-dump" class="stats-dump"></div>
+        </div>
+
+        <!-- Tools Tab -->
+        <div id="tab-tools" class="tab-content">
+            <details class="test-section" open>
+                <summary>Encryption Verification</summary>
+                <div class="test-section-body">
+                    <p class="test-desc">Compare DTLS fingerprints to verify end-to-end encryption.</p>
+                    <div class="test-controls-row">
+                        <label>Peer:</label>
+                        <select id="encrypt-peer-select" class="peer-select"></select>
+                        <button id="btn-encrypt-verify" class="btn primary">Verify</button>
+                    </div>
+                    <div id="encrypt-results" class="test-results"></div>
+                </div>
+            </details>
+
+            <details class="test-section">
+                <summary>Clipboard Sync</summary>
+                <div class="test-section-body">
+                    <p class="test-desc">Send clipboard text to all connected peers.</p>
+                    <div class="test-controls-row">
+                        <button id="btn-clipboard-send" class="btn primary">Send Clipboard</button>
+                    </div>
+                    <div id="clipboard-received"></div>
+                </div>
+            </details>
+
+            <details class="test-section">
+                <summary>Geolocation Sharing</summary>
+                <div class="test-section-body">
+                    <p class="test-desc">Share your GPS coordinates with peers and calculate distances.</p>
+                    <div class="test-controls-row">
+                        <button id="btn-geo-share" class="btn primary">Share Location</button>
+                    </div>
+                    <div id="geo-results" class="test-results"></div>
+                </div>
+            </details>
+
+            <details class="test-section">
+                <summary>Shared Whiteboard</summary>
+                <div class="test-section-body">
+                    <div class="test-controls-row">
+                        <input type="color" id="wb-color" value="#2563eb">
+                        <label>Size:</label>
+                        <input type="number" id="wb-size" value="3" min="1" max="20">
+                        <button id="btn-wb-clear" class="btn secondary">Clear</button>
+                    </div>
+                    <canvas id="whiteboard-canvas" width="600" height="300"></canvas>
+                </div>
+            </details>
+
+            <details class="test-section">
+                <summary>Sensor Streaming</summary>
+                <div class="test-section-body">
+                    <p class="test-desc">Stream device accelerometer and gyroscope data to peers.</p>
+                    <div class="test-controls-row">
+                        <button id="btn-sensor-start" class="btn primary">Start Streaming</button>
+                        <button id="btn-sensor-stop" class="btn danger hidden">Stop</button>
+                    </div>
+                    <div id="sensor-results" class="test-results"></div>
+                </div>
+            </details>
         </div>
     </section>
 
@@ -264,6 +606,11 @@
     <script src="qr.js"></script>
     <script src="peer.js"></script>
     <script src="speedtest.js"></script>
+    <script src="stats-explorer.js"></script>
+    <script src="datachannel-tests.js"></script>
+    <script src="network-tests.js"></script>
+    <script src="media-extended.js"></script>
+    <script src="tools.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

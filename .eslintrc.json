@@ -13,6 +13,11 @@
         "QR": "writable",
         "SpeedTest": "writable",
         "App": "writable",
+        "StatsExplorer": "writable",
+        "DataChannelTests": "writable",
+        "NetworkTests": "writable",
+        "MediaExtended": "writable",
+        "Tools": "writable",
         "pako": "readonly",
         "QRCode": "readonly",
         "Html5Qrcode": "readonly"

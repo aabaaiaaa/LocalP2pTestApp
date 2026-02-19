@@ -28,18 +28,55 @@ class PeerConnection {
         this._bytesSent = 0;
         this._bytesReceived = 0;
 
+        // Extensible message handlers (type -> callback)
+        this._messageHandlers = new Map();
+
+        // Secondary data channel handlers (label -> callback)
+        this._dataChannelHandlers = new Map();
+
         // Remote peer info (set after introduce handshake)
         this.remoteName = null;
+    }
+
+    // === EXTENSIBILITY ===
+
+    registerHandler(type, callback) {
+        this._messageHandlers.set(type, callback);
+    }
+
+    registerDataChannelHandler(label, callback) {
+        this._dataChannelHandlers.set(label, callback);
+    }
+
+    createDataChannel(label, options) {
+        if (!this._pc) throw new Error('No peer connection');
+        const dc = this._pc.createDataChannel(label, options);
+        dc.binaryType = 'arraybuffer';
+        return dc;
+    }
+
+    getRTCPeerConnection() {
+        return this._pc;
+    }
+
+    getDataChannel() {
+        return this._dc;
     }
 
     // === CONNECTION SETUP ===
 
     _createConnection() {
-        const pc = new RTCPeerConnection({ iceServers: [] });
+        const pc = new RTCPeerConnection({ iceServers: PeerManager._iceServers || [] });
 
         pc.oniceconnectionstatechange = () => {
             const state = pc.iceConnectionState;
-            this.callbacks.onStateChange(this.peerId, state);
+            // Don't fire 'connected'/'completed' here — dc.onopen handles the
+            // real "connected" event.  ICE can report 'connected' before the
+            // remote side has the answer (especially on LAN), which would
+            // prematurely switch the UI away from the answer-QR screen.
+            if (state !== 'connected' && state !== 'completed') {
+                this.callbacks.onStateChange(this.peerId, state);
+            }
             if (state === 'failed') {
                 this.callbacks.onError(this.peerId, new Error('Connection failed'));
             }
@@ -80,8 +117,19 @@ class PeerConnection {
         const pc = this._createConnection();
 
         pc.ondatachannel = (event) => {
-            this._dc = event.channel;
-            this._setupDataChannel(event.channel);
+            const ch = event.channel;
+            if (ch.label === 'messages') {
+                this._dc = ch;
+                this._setupDataChannel(ch);
+            } else {
+                ch.binaryType = 'arraybuffer';
+                const handler = this._dataChannelHandlers.get(ch.label);
+                if (handler) {
+                    handler(ch);
+                } else if (PeerManager.onDataChannel) {
+                    PeerManager.onDataChannel(this.peerId, ch);
+                }
+            }
         };
 
         await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp }));
@@ -214,6 +262,15 @@ class PeerConnection {
                 case 'renegotiate-answer':
                     this._handleRenegotiateAnswer(msg.sdp);
                     break;
+                default: {
+                    const handler = this._messageHandlers.get(msg.type);
+                    if (handler) {
+                        handler(this.peerId, msg);
+                    } else {
+                        console.warn('Unhandled message type:', msg.type);
+                    }
+                    break;
+                }
             }
         } else {
             // ArrayBuffer — file chunk or speed test data
@@ -560,6 +617,7 @@ const PeerManager = {
     _localId: null,
     _localName: null,
     _pendingConnections: new Map(), // tempId -> PeerConnection (before introduce)
+    _iceServers: [],
 
     HEARTBEAT_INTERVAL: 3000,
     HEARTBEAT_TIMEOUT: 10000,
@@ -588,6 +646,7 @@ const PeerManager = {
     onTyping: null,
     onPeerJoined: null,
     onPeerLeft: null,
+    onDataChannel: null,
 
     init(name) {
         PeerManager._localId = PeerManager._generateId();
@@ -862,6 +921,25 @@ const PeerManager = {
         const conn = PeerManager._connections.get(peerId);
         if (!conn) throw new Error('Peer not found: ' + peerId);
         conn.stopMedia();
+    },
+
+    setIceServers(servers) {
+        PeerManager._iceServers = servers || [];
+    },
+
+    // Send a raw JSON message to a specific peer
+    sendRaw(peerId, msg) {
+        const conn = PeerManager._connections.get(peerId);
+        if (!conn) return false;
+        return conn._send(JSON.stringify(msg));
+    },
+
+    // Broadcast a raw JSON message to all peers
+    broadcastRaw(msg) {
+        const data = JSON.stringify(msg);
+        for (const conn of PeerManager._connections.values()) {
+            conn._send(data);
+        }
     },
 
     // === CLEANUP ===

@@ -10,6 +10,8 @@ const App = {
     _currentModalConnId: null,
     _networkStatsInterval: null,
     _peerNames: new Map(),      // peerId -> name
+    _cameraStream: null,
+    _facingMode: 'environment',
 
     init() {
         // Generate preview name
@@ -40,6 +42,12 @@ const App = {
         document.getElementById('msg-input').addEventListener('keypress', (e) => {
             if (e.key === 'Enter') App.sendMessage();
         });
+
+        // Camera
+        document.getElementById('btn-camera').addEventListener('click', () => App.openCamera());
+        document.getElementById('btn-camera-close').addEventListener('click', () => App.closeCamera());
+        document.getElementById('btn-camera-capture').addEventListener('click', () => App.capturePhoto());
+        document.getElementById('btn-camera-switch').addEventListener('click', () => App.switchCamera());
 
         // Typing indicator
         document.getElementById('msg-input').addEventListener('input', () => App._handleTypingInput());
@@ -93,6 +101,13 @@ const App = {
         PeerManager.onTyping = (peerId, isTyping) => App.showTypingIndicator(peerId, isTyping);
         PeerManager.onPeerJoined = (peerId, name) => App.handlePeerJoined(peerId, name);
         PeerManager.onPeerLeft = (peerId) => App.handlePeerLeft(peerId);
+
+        // Init extended modules
+        StatsExplorer.init();
+        DataChannelTests.init();
+        NetworkTests.init();
+        MediaExtended.init();
+        Tools.init();
     },
 
     _initPeerManager() {
@@ -203,6 +218,17 @@ const App = {
         App._addPeerChip(peerId, name);
         App._updatePeerSelects();
         App.displaySystemMessage(name + ' joined');
+
+        // Register extended module handlers on the new connection
+        const conn = PeerManager.get(peerId);
+        if (conn) {
+            conn.registerHandler('image', (pid, msg) => {
+                App.displayImageMessage(pid, msg.data, 'remote');
+            });
+            DataChannelTests.registerHandlers(conn);
+            NetworkTests.registerHandlers(conn);
+            Tools.registerHandlers(conn);
+        }
     },
 
     handlePeerLeft(peerId) {
@@ -252,7 +278,11 @@ const App = {
 
     _updatePeerSelects() {
         const peers = PeerManager.getConnectedPeers();
-        const selects = ['file-peer-select', 'speed-peer-select', 'media-peer-select'];
+        const selects = [
+            'file-peer-select', 'speed-peer-select', 'media-peer-select',
+            'dc-peer-select', 'conntype-peer-select', 'stats-peer-select',
+            'mtu-peer-select', 'restart-peer-select', 'encrypt-peer-select'
+        ];
 
         for (const selectId of selects) {
             const select = document.getElementById(selectId);
@@ -389,6 +419,109 @@ const App = {
         div.textContent = text;
         log.appendChild(div);
         log.scrollTop = log.scrollHeight;
+    },
+
+    displayImageMessage(peerId, dataUrl, origin) {
+        const log = document.getElementById('message-log');
+
+        if (origin === 'remote') {
+            const group = document.createElement('div');
+            group.className = 'message-group';
+
+            const sender = document.createElement('div');
+            sender.className = 'message-sender';
+            sender.textContent = App._peerNames.get(peerId) || peerId;
+
+            const msg = document.createElement('div');
+            msg.className = 'message remote image-message';
+
+            const img = document.createElement('img');
+            img.src = dataUrl;
+            img.addEventListener('click', () => window.open(dataUrl, '_blank'));
+
+            msg.appendChild(img);
+            group.appendChild(sender);
+            group.appendChild(msg);
+            log.appendChild(group);
+        } else {
+            const div = document.createElement('div');
+            div.className = 'message local image-message';
+
+            const img = document.createElement('img');
+            img.src = dataUrl;
+            img.addEventListener('click', () => window.open(dataUrl, '_blank'));
+
+            div.appendChild(img);
+            log.appendChild(div);
+        }
+
+        log.scrollTop = log.scrollHeight;
+    },
+
+    // === CAMERA ===
+
+    async openCamera() {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: App._facingMode }
+            });
+            App._cameraStream = stream;
+            document.getElementById('camera-preview').srcObject = stream;
+            document.getElementById('camera-overlay').classList.remove('hidden');
+        } catch (err) {
+            console.error('Camera access failed:', err);
+            alert('Could not access camera: ' + err.message);
+        }
+    },
+
+    closeCamera() {
+        if (App._cameraStream) {
+            App._cameraStream.getTracks().forEach(t => t.stop());
+            App._cameraStream = null;
+        }
+        document.getElementById('camera-preview').srcObject = null;
+        document.getElementById('camera-overlay').classList.add('hidden');
+    },
+
+    async switchCamera() {
+        App._facingMode = App._facingMode === 'environment' ? 'user' : 'environment';
+        if (App._cameraStream) {
+            App._cameraStream.getTracks().forEach(t => t.stop());
+        }
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: App._facingMode }
+            });
+            App._cameraStream = stream;
+            document.getElementById('camera-preview').srcObject = stream;
+        } catch (err) {
+            console.error('Camera switch failed:', err);
+        }
+    },
+
+    capturePhoto() {
+        const video = document.getElementById('camera-preview');
+        const canvas = document.getElementById('camera-canvas');
+
+        // Scale down to max 1280px on longest side
+        let w = video.videoWidth;
+        let h = video.videoHeight;
+        const maxDim = 1280;
+        if (w > maxDim || h > maxDim) {
+            const scale = maxDim / Math.max(w, h);
+            w = Math.round(w * scale);
+            h = Math.round(h * scale);
+        }
+
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(video, 0, 0, w, h);
+
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+        PeerManager.broadcastRaw({ type: 'image', data: dataUrl });
+        App.displayImageMessage(null, dataUrl, 'local');
+        App.closeCamera();
     },
 
     // === FILES ===
@@ -777,6 +910,11 @@ const App = {
             App._drawMesh();
             App._updateTrafficTable();
         }
+
+        // Stop stats polling when leaving stats tab
+        if (name !== 'stats' && StatsExplorer._running) {
+            StatsExplorer.stop();
+        }
     },
 
     async cancelScan(returnState) {
@@ -790,8 +928,15 @@ const App = {
     },
 
     reset() {
+        App.closeCamera();
         QR.stopDisplay();
         QR.stopScanner();
+        StatsExplorer.stop();
+        MediaExtended.stopScreenShare();
+        MediaExtended.stopVisualizer();
+        MediaExtended.stopRecording();
+        Tools.stopSensors();
+        if (NetworkTests._simEnabled) NetworkTests.disableSim();
         PeerManager.closeAll();
         App.role = null;
         App._currentConnId = null;
@@ -808,6 +953,7 @@ const App = {
         document.getElementById('remote-videos').innerHTML = '';
         document.getElementById('typing-indicator').classList.add('hidden');
         document.getElementById('typing-indicator').innerHTML = '';
+        document.getElementById('stats-dump').textContent = '';
         App.setState('home');
     },
 

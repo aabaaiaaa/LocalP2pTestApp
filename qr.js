@@ -5,6 +5,8 @@ const QR = {
     _cycleTimer: null,
     _currentChunks: [],
     _currentIndex: 0,
+    _cycleSpeed: 500,
+    _currentContainerId: null,
 
     CHUNK_MAX: 300,
 
@@ -40,8 +42,22 @@ const QR = {
         counter.textContent = 'QR 1 of ' + chunks.length;
         section.appendChild(counter);
 
+        const speedToggle = document.createElement('label');
+        speedToggle.className = 'qr-speed-toggle';
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.id = containerId + '-slow';
+        checkbox.addEventListener('change', (e) => {
+            QR._cycleSpeed = e.target.checked ? 1000 : 500;
+            QR._startCycleTimer(QR._currentContainerId);
+        });
+        speedToggle.appendChild(checkbox);
+        speedToggle.appendChild(document.createTextNode(' Slower (1s)'));
+        section.appendChild(speedToggle);
+
         container.parentNode.insertBefore(section, container.nextSibling);
 
+        QR._currentContainerId = containerId;
         QR._renderQR(miniContainer, chunks[0], 360);
         QR._startCycleTimer(containerId);
     },
@@ -81,7 +97,7 @@ const QR = {
         QR._cycleTimer = setInterval(() => {
             QR._currentIndex = (QR._currentIndex + 1) % QR._currentChunks.length;
             QR._showChunk(containerId);
-        }, 2500);
+        }, QR._cycleSpeed);
     },
 
     _stopCycleTimer() {
