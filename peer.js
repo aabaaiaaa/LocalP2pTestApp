@@ -1,94 +1,96 @@
-// peer.js — WebRTC peer connection lifecycle
+// peer.js — Multi-peer mesh networking via WebRTC
 
-const Peer = {
-    _pc: null,
-    _dc: null,
-    _localStream: null,
-    _statsInterval: null,
-    _heartbeatInterval: null,
-    _lastPeerHeartbeat: 0,
-    _incomingFile: null,
-    _speedTestActive: false,
-    _speedTestResolve: null,
-    _speedTestStart: 0,
-    _speedTestReceived: 0,
-    _speedTestExpected: 0,
+// ─── PeerConnection class (one instance per remote peer) ───
 
-    HEARTBEAT_INTERVAL: 3000,
-    HEARTBEAT_TIMEOUT: 10000,
+class PeerConnection {
+    constructor(peerId, callbacks) {
+        this.peerId = peerId;
+        this.callbacks = callbacks;
 
-    // Callbacks set by app.js
-    onMessage: null,
-    onFileMetadata: null,
-    onFileChunk: null,
-    onFileComplete: null,
-    onStateChange: null,
-    onError: null,
-    onPong: null,
-    onSpeedData: null,
-    onSpeedEnd: null,
-    onRemoteStream: null,
-    onMediaStats: null,
+        this._pc = null;
+        this._dc = null;
+        this._incomingFile = null;
+        this._speedTestActive = false;
+        this._speedTestResolve = null;
+        this._speedTestStart = 0;
+        this._speedTestReceived = 0;
+        this._speedTestExpected = 0;
+        this._localStream = null;
+        this._statsInterval = null;
+        this._heartbeatInterval = null;
+        this._lastPeerHeartbeat = 0;
+        this._heartbeatState = 'connected';
+        this._renegotiating = false;
 
-    CHUNK_SIZE: 16384,
+        // Traffic counters
+        this._messagesSent = 0;
+        this._messagesReceived = 0;
+        this._bytesSent = 0;
+        this._bytesReceived = 0;
+
+        // Remote peer info (set after introduce handshake)
+        this.remoteName = null;
+    }
+
+    // === CONNECTION SETUP ===
 
     _createConnection() {
         const pc = new RTCPeerConnection({ iceServers: [] });
 
         pc.oniceconnectionstatechange = () => {
             const state = pc.iceConnectionState;
-            if (Peer.onStateChange) Peer.onStateChange(state);
+            this.callbacks.onStateChange(this.peerId, state);
             if (state === 'failed') {
-                if (Peer.onError) Peer.onError(new Error('Connection failed'));
+                this.callbacks.onError(this.peerId, new Error('Connection failed'));
             }
         };
 
         pc.ontrack = (event) => {
-            if (Peer.onRemoteStream && event.streams[0]) {
-                Peer.onRemoteStream(event.streams[0]);
+            if (event.streams[0]) {
+                this.callbacks.onRemoteStream(this.peerId, event.streams[0]);
             }
         };
 
-        Peer._pc = pc;
+        this._pc = pc;
         return pc;
-    },
+    }
 
     // === OFFERER ===
 
     async createOffer() {
-        const pc = Peer._createConnection();
+        const pc = this._createConnection();
         const dc = pc.createDataChannel('messages', { ordered: true });
-        Peer._setupDataChannel(dc);
-        Peer._dc = dc;
+        this._setupDataChannel(dc);
+        this._dc = dc;
 
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
-        await Peer._waitForIce(pc);
+        await this._waitForIce(pc);
 
         return pc.localDescription;
-    },
+    }
 
     async processAnswer(sdp) {
-        await Peer._pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp }));
-    },
+        await this._pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp }));
+    }
 
     // === JOINER ===
 
     async processOfferAndCreateAnswer(sdp) {
-        const pc = Peer._createConnection();
+        const pc = this._createConnection();
 
         pc.ondatachannel = (event) => {
-            Peer._dc = event.channel;
-            Peer._setupDataChannel(event.channel);
+            this._dc = event.channel;
+            this._setupDataChannel(event.channel);
         };
 
         await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp }));
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
-        await Peer._waitForIce(pc);
+        await this._waitForIce(pc);
 
         return pc.localDescription;
-    },
+    }
 
     // === ICE ===
 
@@ -108,7 +110,7 @@ const Peer = {
                 }
             };
         });
-    },
+    }
 
     // === DATA CHANNEL ===
 
@@ -116,25 +118,34 @@ const Peer = {
         dc.binaryType = 'arraybuffer';
 
         dc.onopen = () => {
-            if (Peer.onStateChange) Peer.onStateChange('connected');
-            Peer._setupRenegotiation();
-            Peer._startHeartbeat();
+            this.callbacks.onStateChange(this.peerId, 'connected');
+            this._setupRenegotiation();
+            this._startHeartbeat();
+            // Send introduce message
+            this._send(JSON.stringify({
+                type: 'introduce',
+                peerId: PeerManager._localId,
+                name: PeerManager._localName
+            }));
         };
 
         dc.onclose = () => {
-            Peer._stopHeartbeat();
-            if (Peer.onStateChange) Peer.onStateChange('disconnected');
+            this._stopHeartbeat();
+            this.callbacks.onStateChange(this.peerId, 'disconnected');
         };
 
         dc.onerror = (err) => {
-            if (Peer.onError) Peer.onError(err);
+            this.callbacks.onError(this.peerId, err);
         };
 
-        dc.onmessage = (event) => Peer._handleMessage(event);
-    },
+        dc.onmessage = (event) => this._handleMessage(event);
+    }
 
     _handleMessage(event) {
         if (typeof event.data === 'string') {
+            this._messagesReceived++;
+            this._bytesReceived += event.data.length;
+
             let msg;
             try {
                 msg = JSON.parse(event.data);
@@ -144,125 +155,182 @@ const Peer = {
             }
             switch (msg.type) {
                 case 'text':
-                    if (Peer.onMessage) Peer.onMessage(msg.data);
+                    this.callbacks.onMessage(this.peerId, msg.data);
+                    break;
+                case 'typing':
+                    this.callbacks.onTyping(this.peerId, msg.isTyping);
+                    break;
+                case 'introduce':
+                    PeerManager._handleIntroduce(this.peerId, msg.peerId, msg.name);
+                    break;
+                case 'peer-list':
+                    PeerManager._handlePeerList(this.peerId, msg.peers);
+                    break;
+                case 'relay-offer':
+                    PeerManager._handleRelayOffer(this.peerId, msg);
+                    break;
+                case 'relay-answer':
+                    PeerManager._handleRelayAnswer(this.peerId, msg);
                     break;
                 case 'file-meta':
-                    Peer._incomingFile = { name: msg.name, size: msg.size, mimeType: msg.mimeType, chunks: [], received: 0 };
-                    if (Peer.onFileMetadata) Peer.onFileMetadata(msg);
+                    this._incomingFile = { name: msg.name, size: msg.size, mimeType: msg.mimeType, chunks: [], received: 0 };
+                    this.callbacks.onFileMetadata(this.peerId, msg);
                     break;
                 case 'file-end':
-                    if (Peer._incomingFile) {
-                        const blob = new Blob(Peer._incomingFile.chunks, { type: Peer._incomingFile.mimeType });
-                        if (Peer.onFileComplete) Peer.onFileComplete(blob, Peer._incomingFile.name);
-                        Peer._incomingFile = null;
+                    if (this._incomingFile) {
+                        const blob = new Blob(this._incomingFile.chunks, { type: this._incomingFile.mimeType });
+                        this.callbacks.onFileComplete(this.peerId, blob, this._incomingFile.name);
+                        this._incomingFile = null;
                     }
                     break;
                 case 'ping':
-                    Peer._send(JSON.stringify({ type: 'pong', id: msg.id, timestamp: msg.timestamp }));
+                    this._send(JSON.stringify({ type: 'pong', id: msg.id, timestamp: msg.timestamp }));
                     break;
                 case 'pong':
-                    if (Peer.onPong) Peer.onPong(msg);
+                    this.callbacks.onPong(this.peerId, msg);
                     break;
                 case 'speed-start':
-                    Peer._speedTestActive = true;
-                    Peer._speedTestReceived = 0;
-                    Peer._speedTestExpected = msg.size;
-                    Peer._speedTestStart = performance.now();
+                    this._speedTestActive = true;
+                    this._speedTestReceived = 0;
+                    this._speedTestExpected = msg.size;
+                    this._speedTestStart = performance.now();
                     break;
                 case 'speed-end':
-                    Peer._speedTestActive = false;
-                    if (Peer.onSpeedEnd) {
-                        const elapsed = performance.now() - Peer._speedTestStart;
-                        Peer.onSpeedEnd({ bytes: Peer._speedTestReceived, ms: elapsed });
+                    this._speedTestActive = false;
+                    if (this.callbacks.onSpeedEnd) {
+                        const elapsed = performance.now() - this._speedTestStart;
+                        this.callbacks.onSpeedEnd(this.peerId, { bytes: this._speedTestReceived, ms: elapsed });
                     }
                     break;
                 case 'heartbeat':
-                    Peer._send(JSON.stringify({ type: 'heartbeat-ack' }));
+                    this._send(JSON.stringify({ type: 'heartbeat-ack' }));
                     break;
                 case 'heartbeat-ack':
-                    Peer._lastPeerHeartbeat = Date.now();
+                    this._lastPeerHeartbeat = Date.now();
                     break;
                 case 'renegotiate-offer':
-                    Peer._handleRenegotiateOffer(msg.sdp);
+                    this._handleRenegotiateOffer(msg.sdp);
                     break;
                 case 'renegotiate-answer':
-                    Peer._handleRenegotiateAnswer(msg.sdp);
+                    this._handleRenegotiateAnswer(msg.sdp);
                     break;
             }
         } else {
             // ArrayBuffer — file chunk or speed test data
-            if (Peer._speedTestActive) {
-                Peer._speedTestReceived += event.data.byteLength;
-                if (Peer.onSpeedData) Peer.onSpeedData(Peer._speedTestReceived, Peer._speedTestExpected);
-            } else if (Peer._incomingFile) {
-                Peer._incomingFile.chunks.push(event.data);
-                Peer._incomingFile.received += event.data.byteLength;
-                if (Peer.onFileChunk) Peer.onFileChunk(event.data, Peer._incomingFile.received, Peer._incomingFile.size);
+            this._bytesReceived += event.data.byteLength;
+
+            if (this._speedTestActive) {
+                this._speedTestReceived += event.data.byteLength;
+                if (this.callbacks.onSpeedData) {
+                    this.callbacks.onSpeedData(this.peerId, this._speedTestReceived, this._speedTestExpected);
+                }
+            } else if (this._incomingFile) {
+                this._incomingFile.chunks.push(event.data);
+                this._incomingFile.received += event.data.byteLength;
+                this.callbacks.onFileChunk(this.peerId, event.data, this._incomingFile.received, this._incomingFile.size);
             }
         }
-    },
+    }
 
     _send(data) {
-        if (Peer._dc && Peer._dc.readyState === 'open') {
-            Peer._dc.send(data);
+        if (this._dc && this._dc.readyState === 'open') {
+            this._dc.send(data);
+            this._messagesSent++;
+            this._bytesSent += (typeof data === 'string') ? data.length : data.byteLength;
             return true;
         }
         return false;
-    },
+    }
 
     sendMessage(text) {
-        return Peer._send(JSON.stringify({ type: 'text', data: text }));
-    },
+        return this._send(JSON.stringify({ type: 'text', data: text }));
+    }
+
+    sendTyping(isTyping) {
+        return this._send(JSON.stringify({ type: 'typing', isTyping }));
+    }
 
     sendPing(id) {
-        return Peer._send(JSON.stringify({ type: 'ping', id, timestamp: performance.now() }));
-    },
+        return this._send(JSON.stringify({ type: 'ping', id, timestamp: performance.now() }));
+    }
 
     // === FILE TRANSFER ===
 
     async sendFile(file) {
-        if (!Peer._dc || Peer._dc.readyState !== 'open') throw new Error('Not connected');
+        if (!this._dc || this._dc.readyState !== 'open') throw new Error('Not connected');
 
-        if (!Peer._send(JSON.stringify({ type: 'file-meta', name: file.name, size: file.size, mimeType: file.type || 'application/octet-stream' }))) {
+        if (!this._send(JSON.stringify({ type: 'file-meta', name: file.name, size: file.size, mimeType: file.type || 'application/octet-stream' }))) {
             throw new Error('Failed to send file metadata — channel closed');
         }
 
         const buffer = await file.arrayBuffer();
-        await Peer._sendBuffer(buffer);
+        await this._sendBuffer(buffer);
 
-        if (!Peer._send(JSON.stringify({ type: 'file-end' }))) {
+        if (!this._send(JSON.stringify({ type: 'file-end' }))) {
             throw new Error('Failed to send file-end marker — channel closed');
         }
-    },
+    }
 
     // === SPEED TEST ===
 
     async sendSpeedTest(sizeBytes) {
-        if (!Peer._dc || Peer._dc.readyState !== 'open') throw new Error('Not connected');
+        if (!this._dc || this._dc.readyState !== 'open') throw new Error('Not connected');
 
-        if (!Peer._send(JSON.stringify({ type: 'speed-start', size: sizeBytes }))) {
+        if (!this._send(JSON.stringify({ type: 'speed-start', size: sizeBytes }))) {
             throw new Error('Failed to start speed test — channel closed');
         }
 
         const buffer = new ArrayBuffer(sizeBytes);
-        // Fill with random-ish data to prevent compression cheating
         const view = new Uint32Array(buffer);
         for (let i = 0; i < view.length; i++) view[i] = (Math.random() * 0xFFFFFFFF) >>> 0;
 
         const start = performance.now();
-        await Peer._sendBuffer(buffer);
+        await this._sendBuffer(buffer);
         const elapsed = performance.now() - start;
 
-        Peer._send(JSON.stringify({ type: 'speed-end' }));
+        this._send(JSON.stringify({ type: 'speed-end' }));
 
         return { bytes: sizeBytes, ms: elapsed };
-    },
+    }
+
+    async sendSustainedTest(durationMs) {
+        if (!this._dc || this._dc.readyState !== 'open') throw new Error('Not connected');
+
+        const chunkSize = 64 * 1024;
+        const chunk = new ArrayBuffer(chunkSize);
+        const view = new Uint32Array(chunk);
+        for (let i = 0; i < view.length; i++) view[i] = (Math.random() * 0xFFFFFFFF) >>> 0;
+
+        this._send(JSON.stringify({ type: 'speed-start', size: -1 }));
+
+        const start = performance.now();
+        let totalSent = 0;
+        const dc = this._dc;
+
+        while (performance.now() - start < durationMs) {
+            if (dc.bufferedAmount > 65536) {
+                await new Promise(r => {
+                    dc.onbufferedamountlow = () => { dc.onbufferedamountlow = null; r(); };
+                    dc.bufferedAmountLowThreshold = 16384;
+                });
+            }
+            dc.send(chunk);
+            totalSent += chunkSize;
+            this._bytesSent += chunkSize;
+        }
+
+        const elapsed = performance.now() - start;
+        this._send(JSON.stringify({ type: 'speed-end' }));
+
+        return { bytes: totalSent, ms: elapsed };
+    }
 
     // === SHARED BUFFER SENDING WITH BACKPRESSURE ===
 
     _sendBuffer(buffer) {
         return new Promise((resolve, reject) => {
-            const dc = Peer._dc;
+            const dc = this._dc;
+            const CHUNK_SIZE = 16384;
             let offset = 0;
 
             const onClose = () => {
@@ -293,8 +361,10 @@ const Peer = {
                             dc.bufferedAmountLowThreshold = 16384;
                             return;
                         }
-                        const end = Math.min(offset + Peer.CHUNK_SIZE, buffer.byteLength);
-                        dc.send(buffer.slice(offset, end));
+                        const end = Math.min(offset + CHUNK_SIZE, buffer.byteLength);
+                        const slice = buffer.slice(offset, end);
+                        dc.send(slice);
+                        this._bytesSent += slice.byteLength;
                         offset = end;
                     }
                     cleanup();
@@ -307,89 +377,86 @@ const Peer = {
 
             sendChunks();
         });
-    },
+    }
 
     // === MEDIA RENEGOTIATION OVER DATA CHANNEL ===
 
-    _renegotiating: false,
-
     _setupRenegotiation() {
-        if (!Peer._pc) return;
-        Peer._pc.onnegotiationneeded = async () => {
-            if (Peer._renegotiating) return;
-            Peer._renegotiating = true;
+        if (!this._pc) return;
+        this._pc.onnegotiationneeded = async () => {
+            if (this._renegotiating) return;
+            this._renegotiating = true;
             try {
-                const offer = await Peer._pc.createOffer();
-                await Peer._pc.setLocalDescription(offer);
-                Peer._send(JSON.stringify({ type: 'renegotiate-offer', sdp: Peer._pc.localDescription.sdp }));
+                const offer = await this._pc.createOffer();
+                await this._pc.setLocalDescription(offer);
+                this._send(JSON.stringify({ type: 'renegotiate-offer', sdp: this._pc.localDescription.sdp }));
             } catch (err) {
                 console.error('Renegotiation offer failed:', err);
-                Peer._renegotiating = false;
+                this._renegotiating = false;
             }
         };
-    },
+    }
 
     async _handleRenegotiateOffer(sdp) {
         try {
-            await Peer._pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp }));
-            const answer = await Peer._pc.createAnswer();
-            await Peer._pc.setLocalDescription(answer);
-            Peer._send(JSON.stringify({ type: 'renegotiate-answer', sdp: Peer._pc.localDescription.sdp }));
+            await this._pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp }));
+            const answer = await this._pc.createAnswer();
+            await this._pc.setLocalDescription(answer);
+            this._send(JSON.stringify({ type: 'renegotiate-answer', sdp: this._pc.localDescription.sdp }));
         } catch (err) {
             console.error('Renegotiation answer failed:', err);
         }
-    },
+    }
 
     async _handleRenegotiateAnswer(sdp) {
         try {
-            await Peer._pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp }));
+            await this._pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp }));
         } catch (err) {
             console.error('Set renegotiation answer failed:', err);
         }
-        Peer._renegotiating = false;
-    },
+        this._renegotiating = false;
+    }
 
     // === MEDIA ===
 
     async startMedia(video) {
         const constraints = video ? { video: true, audio: true } : { audio: true };
         const stream = await navigator.mediaDevices.getUserMedia(constraints);
-        Peer._localStream = stream;
+        this._localStream = stream;
 
         for (const track of stream.getTracks()) {
-            Peer._pc.addTrack(track, stream);
+            this._pc.addTrack(track, stream);
         }
 
-        Peer._startStatsPolling();
+        this._startStatsPolling();
         return stream;
-    },
+    }
 
     stopMedia() {
-        Peer._stopStatsPolling();
+        this._stopStatsPolling();
 
-        if (Peer._localStream) {
-            for (const track of Peer._localStream.getTracks()) {
+        if (this._localStream) {
+            for (const track of this._localStream.getTracks()) {
                 track.stop();
             }
-            Peer._localStream = null;
+            this._localStream = null;
         }
 
-        // Remove senders
-        if (Peer._pc) {
-            for (const sender of Peer._pc.getSenders()) {
+        if (this._pc) {
+            for (const sender of this._pc.getSenders()) {
                 if (sender.track) {
-                    Peer._pc.removeTrack(sender);
+                    this._pc.removeTrack(sender);
                 }
             }
         }
-    },
+    }
 
     _startStatsPolling() {
         let prevStats = {};
 
-        Peer._statsInterval = setInterval(async () => {
-            if (!Peer._pc) return;
-            const stats = await Peer._pc.getStats();
+        this._statsInterval = setInterval(async () => {
+            if (!this._pc) return;
+            const stats = await this._pc.getStats();
             const result = {};
 
             stats.forEach((report) => {
@@ -425,54 +492,398 @@ const Peer = {
                 }
             });
 
-            if (Peer.onMediaStats) Peer.onMediaStats(result);
+            this.callbacks.onMediaStats(this.peerId, result);
         }, 1000);
-    },
+    }
 
     _stopStatsPolling() {
-        if (Peer._statsInterval) {
-            clearInterval(Peer._statsInterval);
-            Peer._statsInterval = null;
+        if (this._statsInterval) {
+            clearInterval(this._statsInterval);
+            this._statsInterval = null;
         }
-    },
+    }
 
     // === HEARTBEAT ===
 
-    _heartbeatState: 'connected',
-
     _startHeartbeat() {
-        Peer._lastPeerHeartbeat = Date.now();
-        Peer._heartbeatState = 'connected';
+        this._lastPeerHeartbeat = Date.now();
+        this._heartbeatState = 'connected';
 
-        Peer._heartbeatInterval = setInterval(() => {
-            Peer._send(JSON.stringify({ type: 'heartbeat' }));
+        this._heartbeatInterval = setInterval(() => {
+            this._send(JSON.stringify({ type: 'heartbeat' }));
 
-            const silent = Date.now() - Peer._lastPeerHeartbeat;
-            const newState = silent > Peer.HEARTBEAT_TIMEOUT ? 'unresponsive' : 'connected';
-            if (newState !== Peer._heartbeatState) {
-                Peer._heartbeatState = newState;
-                if (Peer.onStateChange) Peer.onStateChange(newState);
+            const silent = Date.now() - this._lastPeerHeartbeat;
+            const newState = silent > PeerManager.HEARTBEAT_TIMEOUT ? 'unresponsive' : 'connected';
+            if (newState !== this._heartbeatState) {
+                this._heartbeatState = newState;
+                this.callbacks.onStateChange(this.peerId, newState);
             }
-        }, Peer.HEARTBEAT_INTERVAL);
-    },
+        }, PeerManager.HEARTBEAT_INTERVAL);
+    }
 
     _stopHeartbeat() {
-        if (Peer._heartbeatInterval) {
-            clearInterval(Peer._heartbeatInterval);
-            Peer._heartbeatInterval = null;
+        if (this._heartbeatInterval) {
+            clearInterval(this._heartbeatInterval);
+            this._heartbeatInterval = null;
         }
-    },
+    }
 
     // === CLEANUP ===
 
     close() {
-        Peer._stopHeartbeat();
-        Peer.stopMedia();
-        if (Peer._dc) { Peer._dc.close(); Peer._dc = null; }
-        if (Peer._pc) { Peer._pc.close(); Peer._pc = null; }
-        Peer._incomingFile = null;
-        Peer._speedTestActive = false;
-        Peer._renegotiating = false;
-        Peer._heartbeatState = 'connected';
+        this._stopHeartbeat();
+        this.stopMedia();
+        if (this._dc) { this._dc.close(); this._dc = null; }
+        if (this._pc) { this._pc.close(); this._pc = null; }
+        this._incomingFile = null;
+        this._speedTestActive = false;
+        this._renegotiating = false;
+        this._heartbeatState = 'connected';
+    }
+
+    getStats() {
+        return {
+            messagesSent: this._messagesSent,
+            messagesReceived: this._messagesReceived,
+            bytesSent: this._bytesSent,
+            bytesReceived: this._bytesReceived,
+            heartbeatState: this._heartbeatState
+        };
+    }
+}
+
+
+// ─── PeerManager singleton (manages all peer connections) ───
+
+const PeerManager = {
+    _connections: new Map(),
+    _localId: null,
+    _localName: null,
+    _pendingConnections: new Map(), // tempId -> PeerConnection (before introduce)
+
+    HEARTBEAT_INTERVAL: 3000,
+    HEARTBEAT_TIMEOUT: 10000,
+
+    _ADJECTIVES: [
+        'Brave', 'Swift', 'Bold', 'Keen', 'Calm', 'Wild', 'Wise', 'Warm',
+        'Cool', 'Fair', 'Glad', 'Pale', 'Dark', 'Soft', 'Loud', 'True'
+    ],
+    _ANIMALS: [
+        'Fox', 'Owl', 'Bear', 'Deer', 'Hawk', 'Wolf', 'Lynx', 'Hare',
+        'Crow', 'Dove', 'Seal', 'Moth', 'Wren', 'Newt', 'Frog', 'Swan'
+    ],
+
+    // Callbacks (set by app.js)
+    onMessage: null,
+    onFileMetadata: null,
+    onFileChunk: null,
+    onFileComplete: null,
+    onStateChange: null,
+    onError: null,
+    onPong: null,
+    onSpeedData: null,
+    onSpeedEnd: null,
+    onRemoteStream: null,
+    onMediaStats: null,
+    onTyping: null,
+    onPeerJoined: null,
+    onPeerLeft: null,
+
+    init(name) {
+        PeerManager._localId = PeerManager._generateId();
+        PeerManager._localName = name || PeerManager._generateName();
+        console.log('PeerManager init:', PeerManager._localId, PeerManager._localName);
+    },
+
+    _generateId() {
+        return Math.random().toString(36).slice(2, 6);
+    },
+
+    _generateName() {
+        const adj = PeerManager._ADJECTIVES[Math.floor(Math.random() * PeerManager._ADJECTIVES.length)];
+        const animal = PeerManager._ANIMALS[Math.floor(Math.random() * PeerManager._ANIMALS.length)];
+        return adj + ' ' + animal;
+    },
+
+    getPreviewName() {
+        // Returns what the auto-generated name would be (for placeholder display)
+        return PeerManager._localName || PeerManager._generateName();
+    },
+
+    _createCallbackProxy() {
+        return {
+            onMessage: (peerId, text) => { if (PeerManager.onMessage) PeerManager.onMessage(peerId, text); },
+            onFileMetadata: (peerId, meta) => { if (PeerManager.onFileMetadata) PeerManager.onFileMetadata(peerId, meta); },
+            onFileChunk: (peerId, chunk, received, total) => { if (PeerManager.onFileChunk) PeerManager.onFileChunk(peerId, chunk, received, total); },
+            onFileComplete: (peerId, blob, name) => { if (PeerManager.onFileComplete) PeerManager.onFileComplete(peerId, blob, name); },
+            onStateChange: (peerId, state) => { if (PeerManager.onStateChange) PeerManager.onStateChange(peerId, state); },
+            onError: (peerId, err) => { if (PeerManager.onError) PeerManager.onError(peerId, err); },
+            onPong: (peerId, msg) => { if (PeerManager.onPong) PeerManager.onPong(peerId, msg); },
+            onSpeedData: (peerId, received, expected) => { if (PeerManager.onSpeedData) PeerManager.onSpeedData(peerId, received, expected); },
+            onSpeedEnd: (peerId, result) => { if (PeerManager.onSpeedEnd) PeerManager.onSpeedEnd(peerId, result); },
+            onRemoteStream: (peerId, stream) => { if (PeerManager.onRemoteStream) PeerManager.onRemoteStream(peerId, stream); },
+            onMediaStats: (peerId, stats) => { if (PeerManager.onMediaStats) PeerManager.onMediaStats(peerId, stats); },
+            onTyping: (peerId, isTyping) => { if (PeerManager.onTyping) PeerManager.onTyping(peerId, isTyping); },
+        };
+    },
+
+    // === OFFER/ANSWER (initial QR-based connection) ===
+
+    async createOffer() {
+        const tempId = 'temp-' + PeerManager._generateId();
+        const conn = new PeerConnection(tempId, PeerManager._createCallbackProxy());
+        PeerManager._pendingConnections.set(tempId, conn);
+
+        const desc = await conn.createOffer();
+        return { connId: tempId, desc };
+    },
+
+    async processAnswer(connId, sdp) {
+        const conn = PeerManager._pendingConnections.get(connId);
+        if (!conn) throw new Error('No pending connection for ' + connId);
+        await conn.processAnswer(sdp);
+    },
+
+    async processOfferAndCreateAnswer(sdp) {
+        const tempId = 'temp-' + PeerManager._generateId();
+        const conn = new PeerConnection(tempId, PeerManager._createCallbackProxy());
+        PeerManager._pendingConnections.set(tempId, conn);
+
+        const desc = await conn.processOfferAndCreateAnswer(sdp);
+        return { connId: tempId, desc };
+    },
+
+    // === INTRODUCE HANDSHAKE ===
+
+    _handleIntroduce(tempId, realPeerId, name) {
+        // Find the connection — could be in pending or connections
+        let conn = PeerManager._pendingConnections.get(tempId);
+        if (!conn) conn = PeerManager._connections.get(tempId);
+        if (!conn) {
+            console.warn('Introduce from unknown connection:', tempId);
+            return;
+        }
+
+        // Re-key from temp ID to real peer ID
+        PeerManager._pendingConnections.delete(tempId);
+        PeerManager._connections.delete(tempId);
+
+        // Duplicate connection prevention: if we already have a connection to this peer
+        if (PeerManager._connections.has(realPeerId)) {
+            // Peer with lexicographically smaller ID is the offerer; other drops
+            if (PeerManager._localId < realPeerId) {
+                // We should be the offerer — keep our existing connection, close new one
+                conn.close();
+                return;
+            } else {
+                // They should be the offerer — close our old, keep new
+                const old = PeerManager._connections.get(realPeerId);
+                old.close();
+            }
+        }
+
+        conn.peerId = realPeerId;
+        conn.remoteName = name;
+        PeerManager._connections.set(realPeerId, conn);
+
+        if (PeerManager.onPeerJoined) PeerManager.onPeerJoined(realPeerId, name);
+
+        // Send peer list to the new peer (for mesh joining)
+        const peers = [];
+        for (const [id, c] of PeerManager._connections) {
+            if (id !== realPeerId && c.remoteName) {
+                peers.push({ peerId: id, name: c.remoteName });
+            }
+        }
+        if (peers.length > 0) {
+            conn._send(JSON.stringify({ type: 'peer-list', peers }));
+        }
+    },
+
+    // === RELAY-BASED MESH JOINING ===
+
+    async _handlePeerList(fromPeerId, peers) {
+        for (const peer of peers) {
+            if (PeerManager._connections.has(peer.peerId)) continue; // Already connected
+            if (peer.peerId === PeerManager._localId) continue; // That's us
+
+            // We (the new joiner) always initiate since the existing peer
+            // doesn't know about us yet. Duplicate prevention in _handleIntroduce
+            // handles the rare case where both sides try simultaneously.
+
+            // Create an offer for this peer and relay through fromPeerId
+            const tempId = 'relay-' + PeerManager._generateId();
+            const conn = new PeerConnection(tempId, PeerManager._createCallbackProxy());
+            PeerManager._pendingConnections.set(tempId, conn);
+
+            try {
+                const desc = await conn.createOffer();
+                // Send relay offer through the peer that told us about the target
+                const relay = PeerManager._connections.get(fromPeerId);
+                if (relay) {
+                    relay._send(JSON.stringify({
+                        type: 'relay-offer',
+                        targetPeerId: peer.peerId,
+                        fromPeerId: PeerManager._localId,
+                        fromName: PeerManager._localName,
+                        sdp: desc.sdp
+                    }));
+                }
+            } catch (err) {
+                console.error('Failed to create relay offer for', peer.peerId, err);
+                PeerManager._pendingConnections.delete(tempId);
+                conn.close();
+            }
+        }
+    },
+
+    _handleRelayOffer(viaPeerId, msg) {
+        if (msg.targetPeerId === PeerManager._localId) {
+            // This relay offer is for us
+            PeerManager._processRelayOffer(viaPeerId, msg);
+        } else {
+            // Forward to the target peer
+            const target = PeerManager._connections.get(msg.targetPeerId);
+            if (target) {
+                target._send(JSON.stringify(msg));
+            }
+        }
+    },
+
+    async _processRelayOffer(viaPeerId, msg) {
+        // Duplicate connection prevention
+        if (PeerManager._connections.has(msg.fromPeerId)) return;
+
+        const tempId = 'relay-' + PeerManager._generateId();
+        const conn = new PeerConnection(tempId, PeerManager._createCallbackProxy());
+        PeerManager._pendingConnections.set(tempId, conn);
+
+        try {
+            const desc = await conn.processOfferAndCreateAnswer(msg.sdp);
+            // Send answer back via the relay peer
+            const relay = PeerManager._connections.get(viaPeerId);
+            if (relay) {
+                relay._send(JSON.stringify({
+                    type: 'relay-answer',
+                    targetPeerId: msg.fromPeerId,
+                    fromPeerId: PeerManager._localId,
+                    sdp: desc.sdp
+                }));
+            }
+        } catch (err) {
+            console.error('Failed to process relay offer from', msg.fromPeerId, err);
+            PeerManager._pendingConnections.delete(tempId);
+            conn.close();
+        }
+    },
+
+    _handleRelayAnswer(viaPeerId, msg) {
+        if (msg.targetPeerId === PeerManager._localId) {
+            // This relay answer is for us — find matching pending connection
+            for (const [tempId, conn] of PeerManager._pendingConnections) {
+                if (tempId.startsWith('relay-') && conn._pc &&
+                    conn._pc.signalingState === 'have-local-offer') {
+                    conn.processAnswer(msg.sdp).catch(err => {
+                        console.error('Failed to process relay answer:', err);
+                    });
+                    return;
+                }
+            }
+            console.warn('No pending relay connection for answer from', msg.fromPeerId);
+        } else {
+            // Forward to the target peer
+            const target = PeerManager._connections.get(msg.targetPeerId);
+            if (target) {
+                target._send(JSON.stringify(msg));
+            }
+        }
+    },
+
+    // === BROADCAST ===
+
+    broadcastMessage(text) {
+        let sent = false;
+        for (const conn of PeerManager._connections.values()) {
+            if (conn.sendMessage(text)) sent = true;
+        }
+        return sent;
+    },
+
+    broadcastTyping(isTyping) {
+        for (const conn of PeerManager._connections.values()) {
+            conn.sendTyping(isTyping);
+        }
+    },
+
+    // === TARGETED OPERATIONS ===
+
+    get(peerId) {
+        return PeerManager._connections.get(peerId) || null;
+    },
+
+    getConnectedPeers() {
+        const peers = [];
+        for (const [id, conn] of PeerManager._connections) {
+            peers.push({
+                peerId: id,
+                name: conn.remoteName || id,
+                state: conn._heartbeatState,
+                stats: conn.getStats()
+            });
+        }
+        return peers;
+    },
+
+    sendFile(peerId, file) {
+        const conn = PeerManager._connections.get(peerId);
+        if (!conn) throw new Error('Peer not found: ' + peerId);
+        return conn.sendFile(file);
+    },
+
+    sendSpeedTest(peerId, size) {
+        const conn = PeerManager._connections.get(peerId);
+        if (!conn) throw new Error('Peer not found: ' + peerId);
+        return conn.sendSpeedTest(size);
+    },
+
+    sendPing(peerId, id) {
+        const conn = PeerManager._connections.get(peerId);
+        if (!conn) throw new Error('Peer not found: ' + peerId);
+        return conn.sendPing(id);
+    },
+
+    startMedia(peerId, video) {
+        const conn = PeerManager._connections.get(peerId);
+        if (!conn) throw new Error('Peer not found: ' + peerId);
+        return conn.startMedia(video);
+    },
+
+    stopMedia(peerId) {
+        const conn = PeerManager._connections.get(peerId);
+        if (!conn) throw new Error('Peer not found: ' + peerId);
+        conn.stopMedia();
+    },
+
+    // === CLEANUP ===
+
+    closeOne(peerId) {
+        const conn = PeerManager._connections.get(peerId);
+        if (conn) {
+            conn.close();
+            PeerManager._connections.delete(peerId);
+            if (PeerManager.onPeerLeft) PeerManager.onPeerLeft(peerId);
+        }
+    },
+
+    closeAll() {
+        for (const [, conn] of PeerManager._connections) {
+            conn.close();
+        }
+        PeerManager._connections.clear();
+
+        for (const [, conn] of PeerManager._pendingConnections) {
+            conn.close();
+        }
+        PeerManager._pendingConnections.clear();
     }
 };

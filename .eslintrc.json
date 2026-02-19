@@ -1,0 +1,36 @@
+{
+    "env": {
+        "browser": true,
+        "es2020": true
+    },
+    "parserOptions": {
+        "ecmaVersion": 2020
+    },
+    "globals": {
+        "PeerManager": "writable",
+        "PeerConnection": "writable",
+        "Signal": "writable",
+        "QR": "writable",
+        "SpeedTest": "writable",
+        "App": "writable",
+        "pako": "readonly",
+        "QRCode": "readonly",
+        "Html5Qrcode": "readonly"
+    },
+    "rules": {
+        "no-undef": "warn",
+        "no-unused-vars": "warn",
+        "no-redeclare": ["error", { "builtinGlobals": false }],
+        "no-dupe-keys": "error",
+        "no-unreachable": "error",
+        "no-constant-condition": "warn",
+        "no-empty": "warn",
+        "no-extra-semi": "warn",
+        "semi": "warn",
+        "no-func-assign": "error",
+        "no-inner-declarations": "warn",
+        "eqeqeq": "warn",
+        "no-self-assign": "error",
+        "no-self-compare": "error"
+    }
+}

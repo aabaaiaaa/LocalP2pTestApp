@@ -1,17 +1,19 @@
-// speedtest.js — Speed test suite for P2P connection
+// speedtest.js — Speed test suite for P2P connection (multi-peer aware)
 
 const SpeedTest = {
     _running: false,
     _pingResolves: {},
+    _targetPeerId: null,
 
-    // Run a quick 1MB throughput test
-    async runQuick() {
+    // Run a quick 1MB throughput test against a specific peer
+    async runQuick(peerId) {
         SpeedTest._running = true;
+        SpeedTest._targetPeerId = peerId;
         SpeedTest._setStatus('Running quick test...');
         SpeedTest._clearResults();
 
         try {
-            const result = await Peer.sendSpeedTest(1 * 1024 * 1024);
+            const result = await PeerManager.sendSpeedTest(peerId, 1 * 1024 * 1024);
             const mbps = ((result.bytes / 1024 / 1024) / (result.ms / 1000)).toFixed(2);
             SpeedTest._clearResults();
             SpeedTest._addCard('Throughput', mbps, 'MB/s', 'done');
@@ -23,18 +25,20 @@ const SpeedTest = {
         }
 
         SpeedTest._running = false;
+        SpeedTest._targetPeerId = null;
     },
 
-    // Run the full test suite
-    async runFull() {
+    // Run the full test suite against a specific peer
+    async runFull(peerId) {
         SpeedTest._running = true;
+        SpeedTest._targetPeerId = peerId;
         SpeedTest._clearResults();
 
         try {
             // 1. Latency test
             SpeedTest._setStatus('Testing latency...');
             SpeedTest._addCard('Latency', '...', '', 'running');
-            const latency = await SpeedTest._testLatency(20);
+            const latency = await SpeedTest._testLatency(peerId, 20);
             SpeedTest._updateCard(0, latency.avg.toFixed(1), 'ms', 'done');
             SpeedTest._addCard('Lat. min', latency.min.toFixed(1), 'ms', 'done');
             SpeedTest._addCard('Lat. max', latency.max.toFixed(1), 'ms', 'done');
@@ -42,21 +46,23 @@ const SpeedTest = {
             // 2. Throughput 1MB
             SpeedTest._setStatus('Testing throughput (1 MB)...');
             SpeedTest._addCard('1 MB test', '...', '', 'running');
-            const t1 = await Peer.sendSpeedTest(1 * 1024 * 1024);
+            const t1 = await PeerManager.sendSpeedTest(peerId, 1 * 1024 * 1024);
             const mbps1 = ((t1.bytes / 1024 / 1024) / (t1.ms / 1000)).toFixed(2);
             SpeedTest._updateCard(3, mbps1, 'MB/s', 'done');
 
             // 3. Throughput 10MB
             SpeedTest._setStatus('Testing throughput (10 MB)...');
             SpeedTest._addCard('10 MB test', '...', '', 'running');
-            const t10 = await Peer.sendSpeedTest(10 * 1024 * 1024);
+            const t10 = await PeerManager.sendSpeedTest(peerId, 10 * 1024 * 1024);
             const mbps10 = ((t10.bytes / 1024 / 1024) / (t10.ms / 1000)).toFixed(2);
             SpeedTest._updateCard(4, mbps10, 'MB/s', 'done');
 
             // 4. Sustained 5s test
             SpeedTest._setStatus('Running sustained test (5s)...');
             SpeedTest._addCard('Sustained', '...', '', 'running');
-            const sustained = await SpeedTest._testSustained(5000);
+            const conn = PeerManager.get(peerId);
+            if (!conn) throw new Error('Peer disconnected');
+            const sustained = await conn.sendSustainedTest(5000);
             const sustainedMbps = ((sustained.bytes / 1024 / 1024) / (sustained.ms / 1000)).toFixed(2);
             SpeedTest._updateCard(5, sustainedMbps, 'MB/s', 'done');
 
@@ -66,10 +72,11 @@ const SpeedTest = {
         }
 
         SpeedTest._running = false;
+        SpeedTest._targetPeerId = null;
     },
 
     // Latency test: send N pings and measure round-trip times
-    async _testLatency(count) {
+    async _testLatency(peerId, count) {
         const times = [];
 
         for (let i = 0; i < count; i++) {
@@ -77,14 +84,13 @@ const SpeedTest = {
                 const id = 'ping-' + i;
                 const sent = performance.now();
 
-                SpeedTest._pingResolves[id] = (msg) => {
+                SpeedTest._pingResolves[id] = () => {
                     delete SpeedTest._pingResolves[id];
                     resolve(performance.now() - sent);
                 };
 
-                Peer.sendPing(id);
+                PeerManager.sendPing(peerId, id);
 
-                // Timeout after 3s
                 setTimeout(() => {
                     if (SpeedTest._pingResolves[id]) {
                         delete SpeedTest._pingResolves[id];
@@ -103,39 +109,9 @@ const SpeedTest = {
         };
     },
 
-    // Sustained test: send data continuously for `durationMs`
-    async _testSustained(durationMs) {
-        const chunkSize = 64 * 1024; // 64KB chunks
-        const chunk = new ArrayBuffer(chunkSize);
-        const view = new Uint32Array(chunk);
-        for (let i = 0; i < view.length; i++) view[i] = (Math.random() * 0xFFFFFFFF) >>> 0;
-
-        // Notify receiver (size -1 = sustained/unknown length)
-        Peer._send(JSON.stringify({ type: 'speed-start', size: -1 }));
-
-        const start = performance.now();
-        let totalSent = 0;
-        const dc = Peer._dc;
-
-        while (performance.now() - start < durationMs) {
-            if (dc.bufferedAmount > 65536) {
-                await new Promise(r => {
-                    dc.onbufferedamountlow = () => { dc.onbufferedamountlow = null; r(); };
-                    dc.bufferedAmountLowThreshold = 16384;
-                });
-            }
-            dc.send(chunk);
-            totalSent += chunkSize;
-        }
-
-        const elapsed = performance.now() - start;
-        Peer._send(JSON.stringify({ type: 'speed-end' }));
-
-        return { bytes: totalSent, ms: elapsed };
-    },
-
-    // Called by app.js when a pong arrives
-    handlePong(msg) {
+    // Called by app.js when a pong arrives — filter by target peer
+    handlePong(peerId, msg) {
+        if (SpeedTest._targetPeerId && peerId !== SpeedTest._targetPeerId) return;
         const resolve = SpeedTest._pingResolves[msg.id];
         if (resolve) resolve(msg);
     },
@@ -179,7 +155,6 @@ const SpeedTest = {
         if (cards[index]) {
             cards[index].className = 'speed-card ' + state;
             const valueEl = cards[index].querySelector('.value');
-            const unitEl = valueEl.querySelector('.unit');
             valueEl.textContent = value;
             const newUnit = document.createElement('span');
             newUnit.className = 'unit';

@@ -11,7 +11,11 @@
     <!-- HOME -->
     <section id="view-home" class="view">
         <h1>P2P Connect</h1>
-        <p class="subtitle">Connect two devices directly using QR codes. No server required.</p>
+        <p class="subtitle">Connect devices directly using QR codes. No server required.</p>
+        <div class="name-input-group">
+            <input type="text" id="device-name" placeholder="Your name (optional)" autocomplete="off">
+            <p class="hint" id="name-preview"></p>
+        </div>
         <div class="button-group">
             <button id="btn-create" class="btn primary">Create Connection</button>
             <button id="btn-join" class="btn secondary">Join Connection</button>
@@ -69,8 +73,8 @@
     <!-- CONNECTED -->
     <section id="view-connected" class="view connected-view">
         <div class="conn-header">
-            <span class="conn-indicator" id="conn-indicator"></span>
-            <span id="conn-status">Connected</span>
+            <div class="peer-list" id="peer-list"></div>
+            <button id="btn-add-peer" class="btn-icon" title="Add Peer">&#x2b;</button>
             <button id="btn-disconnect" class="btn-icon" title="Disconnect">&#x2715;</button>
         </div>
 
@@ -79,11 +83,13 @@
             <button class="tab" data-tab="files">Files</button>
             <button class="tab" data-tab="speed">Speed Test</button>
             <button class="tab" data-tab="media">Media</button>
+            <button class="tab" data-tab="network">Network</button>
         </div>
 
         <!-- Messages Tab -->
         <div id="tab-messages" class="tab-content active">
             <div id="message-log" class="message-log"></div>
+            <div id="typing-indicator" class="typing-indicator hidden"></div>
             <div class="input-bar">
                 <input type="text" id="msg-input" placeholder="Type a message..." autocomplete="off">
                 <button id="btn-send-msg" class="btn primary small">Send</button>
@@ -92,6 +98,10 @@
 
         <!-- Files Tab -->
         <div id="tab-files" class="tab-content">
+            <div class="peer-selector-bar">
+                <label>Send to:</label>
+                <select id="file-peer-select" class="peer-select"></select>
+            </div>
             <div class="file-controls">
                 <label class="btn secondary file-label">
                     Choose File to Send
@@ -107,6 +117,10 @@
 
         <!-- Speed Test Tab -->
         <div id="tab-speed" class="tab-content">
+            <div class="peer-selector-bar">
+                <label>Test peer:</label>
+                <select id="speed-peer-select" class="peer-select"></select>
+            </div>
             <div class="speed-controls">
                 <button id="btn-quick-test" class="btn primary">Quick Test (1 MB)</button>
                 <button id="btn-full-test" class="btn secondary">Full Test Suite</button>
@@ -117,6 +131,10 @@
 
         <!-- Media Tab -->
         <div id="tab-media" class="tab-content">
+            <div class="peer-selector-bar">
+                <label>Stream with:</label>
+                <select id="media-peer-select" class="peer-select"></select>
+            </div>
             <div class="media-controls">
                 <button id="btn-start-video" class="btn primary">Start Video</button>
                 <button id="btn-start-audio" class="btn secondary">Audio Only</button>
@@ -127,10 +145,7 @@
                     <video id="local-video" autoplay muted playsinline></video>
                     <span class="video-label">You</span>
                 </div>
-                <div class="video-wrapper">
-                    <video id="remote-video" autoplay playsinline></video>
-                    <span class="video-label">Peer</span>
-                </div>
+                <div id="remote-videos" class="remote-videos-container"></div>
             </div>
             <div id="media-stats" class="media-stats hidden">
                 <div class="stat-row">
@@ -163,7 +178,75 @@
                 </div>
             </div>
         </div>
+
+        <!-- Network Tab -->
+        <div id="tab-network" class="tab-content">
+            <div class="network-viz">
+                <canvas id="mesh-canvas" width="400" height="300"></canvas>
+            </div>
+            <div class="traffic-stats">
+                <h3>Peer Statistics</h3>
+                <table id="traffic-table" class="traffic-table">
+                    <thead>
+                        <tr>
+                            <th>Peer</th>
+                            <th>State</th>
+                            <th>Msgs Sent</th>
+                            <th>Msgs Recv</th>
+                            <th>Bytes Sent</th>
+                            <th>Bytes Recv</th>
+                        </tr>
+                    </thead>
+                    <tbody id="traffic-tbody"></tbody>
+                </table>
+            </div>
+        </div>
     </section>
+
+    <!-- ADD PEER MODAL -->
+    <div id="add-peer-modal" class="modal-overlay hidden">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>Add Peer</h2>
+                <button id="btn-close-modal" class="btn-icon">&#x2715;</button>
+            </div>
+            <div class="modal-body">
+                <div id="modal-home" class="modal-step">
+                    <button id="modal-btn-create" class="btn primary">Create Offer QR</button>
+                    <button id="modal-btn-join" class="btn secondary">Scan Offer QR</button>
+                </div>
+                <div id="modal-creating" class="modal-step hidden">
+                    <div class="spinner"></div>
+                    <p>Creating offer...</p>
+                </div>
+                <div id="modal-show-offer" class="modal-step hidden">
+                    <div id="modal-qr-offer" class="qr-container"></div>
+                    <p class="hint">Other device: scan this code</p>
+                    <button id="modal-btn-scan-answer" class="btn primary">Scan their response</button>
+                </div>
+                <div id="modal-scan-offer" class="modal-step hidden">
+                    <div id="modal-scanner-offer" class="scanner-container"></div>
+                    <button id="modal-btn-cancel-scan" class="btn secondary">Cancel</button>
+                </div>
+                <div id="modal-creating-answer" class="modal-step hidden">
+                    <div class="spinner"></div>
+                    <p>Creating response...</p>
+                </div>
+                <div id="modal-show-answer" class="modal-step hidden">
+                    <div id="modal-qr-answer" class="qr-container"></div>
+                    <p class="hint">First device: scan this response</p>
+                </div>
+                <div id="modal-scan-answer" class="modal-step hidden">
+                    <div id="modal-scanner-answer" class="scanner-container"></div>
+                    <button id="modal-btn-cancel-scan-answer" class="btn secondary">Cancel</button>
+                </div>
+                <div id="modal-connecting" class="modal-step hidden">
+                    <div class="spinner"></div>
+                    <p>Connecting...</p>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- ERROR -->
     <section id="view-error" class="view">
