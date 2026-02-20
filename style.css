@@ -64,6 +64,15 @@ h1 { font-size: 2rem; font-weight: 700; }
 h2 { font-size: 1.25rem; font-weight: 600; }
 .subtitle { color: var(--text-muted); max-width: 280px; line-height: 1.5; }
 .build-version { color: var(--text-muted); font-size: 0.6875rem; opacity: 0.6; margin-top: -8px; }
+.connected-version-footer {
+    flex-shrink: 0;
+    text-align: center;
+    font-size: 0.6875rem;
+    color: var(--text-muted);
+    opacity: 0.5;
+    padding: 3px 0 4px;
+    border-top: 1px solid var(--surface-alt);
+}
 .hint { color: var(--text-muted); font-size: 0.875rem; }
 .subnet-warning { color: var(--warning); font-size: 0.875rem; }
 .error-text { color: var(--danger); line-height: 1.5; }

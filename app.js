@@ -20,12 +20,13 @@ const App = {
 
     init() {
         // Build version
-        const vEl = document.getElementById('build-version');
-        if (vEl) {
-            vEl.textContent = BUILD_INFO.version === 'dev'
-                ? 'dev build'
-                : BUILD_INFO.version + ' · ' + BUILD_INFO.date;
-        }
+        const versionText = BUILD_INFO.version === 'dev'
+            ? 'dev build'
+            : BUILD_INFO.version + ' · ' + BUILD_INFO.date;
+        ['build-version', 'connected-version'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = versionText;
+        });
 
         // Generate preview name
         PeerManager.init('');
