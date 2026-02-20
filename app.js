@@ -15,6 +15,7 @@ const App = {
     _intentionalDisconnects: new Set(),
     _gracePeriods: new Map(),   // peerId -> { connId, countdownInterval, expiresAt, peerName }
     _beforeUnloadRegistered: false,
+    _reconnectEncodedSdp: null,
 
     init() {
         // Generate preview name
@@ -89,7 +90,8 @@ const App = {
         });
 
         // Reconnect prompt
-        document.getElementById('btn-reconnect').addEventListener('click', () => App.startReconnect());
+        document.getElementById('btn-reconnect-scan').addEventListener('click', () => App.startReconnect('scan'));
+        document.getElementById('btn-reconnect-show').addEventListener('click', () => App.startReconnect('show'));
         document.getElementById('btn-reconnect-dismiss').addEventListener('click', () => App.dismissReconnect());
 
         // Add Peer modal
@@ -1047,6 +1049,7 @@ const App = {
         PeerManager.closeAll();
         App.role = null;
         App._currentConnId = null;
+        App._reconnectEncodedSdp = null;
         App._typingPeers.clear();
         App._peerNames.clear();
         App._clearLocalTyping();
@@ -1249,6 +1252,7 @@ const App = {
 
         // Generate QR
         const encoded = Signal.encode(desc);
+        App._reconnectEncodedSdp = encoded;
         QR.generate('modal-reconnect-qr', encoded);
 
         // Store the connId for scanning answer
@@ -1273,6 +1277,10 @@ const App = {
             // Go back to reconnect step
             if (App._gracePeriods.size > 0) {
                 App._showModalStep('modal-reconnect');
+                // Regenerate QR — stopDisplay wiped it when entering scan mode
+                if (App._reconnectEncodedSdp) {
+                    QR.generate('modal-reconnect-qr', App._reconnectEncodedSdp);
+                }
             } else {
                 App.closeAddPeerModal();
             }
@@ -1299,7 +1307,7 @@ const App = {
         document.querySelector('#view-home .name-input-group').classList.add('hidden');
     },
 
-    async startReconnect() {
+    async startReconnect(mode) {
         const session = App._loadSession();
         if (!session) {
             App.dismissReconnect();
@@ -1316,20 +1324,35 @@ const App = {
         document.querySelector('#view-home .button-group').classList.remove('hidden');
         document.querySelector('#view-home .name-input-group').classList.remove('hidden');
 
-        // Go straight to scan mode (scan the surviving peer's reconnect QR)
-        App.role = 'joiner';
-        App.setState('scan-offer');
-        try {
-            const data = await QR.scan('scanner-offer');
-            App.setState('creating-answer');
-            const { sdp } = Signal.decode(data);
-            const { connId, desc } = await PeerManager.processOfferAndCreateAnswer(sdp);
-            App._currentConnId = connId;
-            const encoded = Signal.encode(desc);
-            QR.generate('qr-answer', encoded);
-            App.setState('show-answer-qr');
-        } catch (err) {
-            App.showError('Failed to reconnect: ' + err.message);
+        if (mode === 'show') {
+            // Create offer and show QR — the other device will scan it
+            App.role = 'offerer';
+            App.setState('creating-offer');
+            try {
+                const { connId, desc } = await PeerManager.createOffer();
+                App._currentConnId = connId;
+                const encoded = Signal.encode(desc);
+                QR.generate('qr-offer', encoded);
+                App.setState('show-offer-qr');
+            } catch (err) {
+                App.showError('Failed to create reconnect offer: ' + err.message);
+            }
+        } else {
+            // Scan the other device's QR
+            App.role = 'joiner';
+            App.setState('scan-offer');
+            try {
+                const data = await QR.scan('scanner-offer');
+                App.setState('creating-answer');
+                const { sdp } = Signal.decode(data);
+                const { connId, desc } = await PeerManager.processOfferAndCreateAnswer(sdp);
+                App._currentConnId = connId;
+                const encoded = Signal.encode(desc);
+                QR.generate('qr-answer', encoded);
+                App.setState('show-answer-qr');
+            } catch (err) {
+                App.showError('Failed to reconnect: ' + err.message);
+            }
         }
     },
 
