@@ -25,7 +25,17 @@ const App = {
             : BUILD_INFO.version + ' · ' + BUILD_INFO.date;
         ['build-version', 'connected-version'].forEach(id => {
             const el = document.getElementById(id);
-            if (el) el.textContent = versionText;
+            if (!el) return;
+            el.textContent = versionText + ' · ';
+            const link = document.createElement('a');
+            link.textContent = 'check for latest';
+            link.href = '#';
+            link.className = 'check-latest-link';
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                window.location.href = window.location.pathname + '?_=' + Date.now();
+            });
+            el.appendChild(link);
         });
 
         // Generate preview name

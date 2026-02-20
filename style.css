@@ -64,6 +64,13 @@ h1 { font-size: 2rem; font-weight: 700; }
 h2 { font-size: 1.25rem; font-weight: 600; }
 .subtitle { color: var(--text-muted); max-width: 280px; line-height: 1.5; }
 .build-version { color: var(--text-muted); font-size: 0.6875rem; opacity: 0.6; margin-top: -8px; }
+.check-latest-link {
+    color: var(--text-muted);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    cursor: pointer;
+}
+.check-latest-link:hover { color: var(--text); }
 .connected-version-footer {
     flex-shrink: 0;
     text-align: center;
