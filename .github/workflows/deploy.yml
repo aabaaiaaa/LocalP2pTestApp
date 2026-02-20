@@ -25,7 +25,7 @@ jobs:
       - name: Generate version.js
         run: |
           SHA=$(git rev-parse --short HEAD)
-          DATE=$(date -u +"%Y-%m-%d")
+          DATE=$(date -u +"%Y-%m-%d %H:%M:%S")
           echo "const BUILD_INFO = { version: '${SHA}', date: '${DATE}' };" > version.js
 
       - uses: actions/configure-pages@v5
