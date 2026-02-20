@@ -75,6 +75,7 @@
     <section id="view-show-offer-qr" class="view">
         <h2>Show this to the other device</h2>
         <div id="qr-offer" class="qr-container"></div>
+        <p class="hint" id="local-ip-display"></p>
         <p class="hint">Other device: tap "Join Connection" and scan this code</p>
         <button id="btn-scan-answer" class="btn primary">Scan their response</button>
     </section>
@@ -96,6 +97,7 @@
     <section id="view-show-answer-qr" class="view">
         <h2>Show this to the first device</h2>
         <div id="qr-answer" class="qr-container"></div>
+        <p id="subnet-warning"></p>
         <p class="hint">First device: tap "Scan their response"</p>
     </section>
 
@@ -607,6 +609,7 @@
                 </div>
                 <div id="modal-show-offer" class="modal-step hidden">
                     <div id="modal-qr-offer" class="qr-container"></div>
+                    <p class="hint" id="modal-local-ip-display"></p>
                     <p class="hint">Other device: scan this code</p>
                     <button id="modal-btn-scan-answer" class="btn primary">Scan their response</button>
                 </div>
@@ -620,6 +623,7 @@
                 </div>
                 <div id="modal-show-answer" class="modal-step hidden">
                     <div id="modal-qr-answer" class="qr-container"></div>
+                    <p id="modal-subnet-warning"></p>
                     <p class="hint">First device: scan this response</p>
                 </div>
                 <div id="modal-scan-answer" class="modal-step hidden">

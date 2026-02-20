@@ -250,31 +250,26 @@ const Tools = {
             const size = parseInt(document.getElementById('wb-size').value) || 3;
             const pts = Tools._whiteboardPoints;
             if (pts.length >= 2) {
+                const x1 = pts[pts.length - 2].x;
+                const y1 = pts[pts.length - 2].y;
+                const x2 = pts[pts.length - 1].x;
+                const y2 = pts[pts.length - 1].y;
                 ctx.beginPath();
-                ctx.moveTo(pts[pts.length - 2].x, pts[pts.length - 2].y);
-                ctx.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
+                ctx.moveTo(x1, y1);
+                ctx.lineTo(x2, y2);
                 ctx.strokeStyle = color;
                 ctx.lineWidth = size;
                 ctx.lineCap = 'round';
                 ctx.stroke();
+
+                // Broadcast segment in real time
+                PeerManager.broadcastRaw({ type: 'whiteboard-draw', action: 'segment', color, size, x1, y1, x2, y2 });
             }
         };
 
         const endDraw = () => {
             if (!Tools._whiteboardDrawing) return;
             Tools._whiteboardDrawing = false;
-
-            if (Tools._whiteboardPoints.length > 0) {
-                const color = document.getElementById('wb-color').value;
-                const size = parseInt(document.getElementById('wb-size').value) || 3;
-                PeerManager.broadcastRaw({
-                    type: 'whiteboard-draw',
-                    action: 'stroke',
-                    color,
-                    size,
-                    points: Tools._whiteboardPoints
-                });
-            }
             Tools._whiteboardPoints = [];
         };
 
@@ -305,6 +300,17 @@ const Tools = {
         if (msg.action === 'clear') {
             ctx.fillStyle = '#fff';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
+            return;
+        }
+
+        if (msg.action === 'segment') {
+            ctx.beginPath();
+            ctx.moveTo(msg.x1, msg.y1);
+            ctx.lineTo(msg.x2, msg.y2);
+            ctx.strokeStyle = msg.color || '#000';
+            ctx.lineWidth = msg.size || 3;
+            ctx.lineCap = 'round';
+            ctx.stroke();
             return;
         }
 

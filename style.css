@@ -64,6 +64,7 @@ h1 { font-size: 2rem; font-weight: 700; }
 h2 { font-size: 1.25rem; font-weight: 600; }
 .subtitle { color: var(--text-muted); max-width: 280px; line-height: 1.5; }
 .hint { color: var(--text-muted); font-size: 0.875rem; }
+.subnet-warning { color: var(--warning); font-size: 0.875rem; }
 .error-text { color: var(--danger); line-height: 1.5; }
 
 /* Name input on home screen */
@@ -562,7 +563,6 @@ h2 { font-size: 1.25rem; font-weight: 600; }
 .traffic-stats {
     padding: 0 16px 16px;
     overflow-x: auto;
-    flex: 1;
 }
 .traffic-stats h3 {
     font-size: 0.875rem;
@@ -910,6 +910,15 @@ h2 { font-size: 1.25rem; font-weight: 600; }
     padding: 4px;
     overflow: hidden;
 }
+/* Local image messages need an explicit width so that the img's max-width: 100%
+   has a definitive containing-block size to resolve against. Without this,
+   align-self: flex-end makes the box auto-width, which creates a circular
+   dependency between the box width and the image's natural size — the browser
+   resolves it using the image's intrinsic width (1280px), then overflow: hidden
+   clips the image to the 80% visual bound, making it appear cut off. */
+.message.local.image-message {
+    width: 80%;
+}
 
 /* Reconnect prompt on home screen */
 .reconnect-prompt {
@@ -1133,6 +1142,17 @@ h2 { font-size: 1.25rem; font-weight: 600; }
 }
 .ice-custom-form input:focus { border-color: var(--primary); }
 .ice-custom-form .btn { width: 100%; }
+
+/* Tabs that contain expandable sections scroll at the tab level.
+   Tabs with bottom-pinned elements (Messages, Files, Speed, Stats)
+   keep overflow: hidden and use internal scroll containers instead. */
+#tab-datachannel,
+#tab-network,
+#tab-media,
+#tab-tools {
+    overflow-y: auto;
+    min-height: 0;
+}
 
 /* Scrollbar styling */
 ::-webkit-scrollbar { width: 4px; }

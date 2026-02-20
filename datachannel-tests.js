@@ -23,6 +23,15 @@ const DataChannelTests = {
         conn.registerHandler('dc-stress-report', (peerId, msg) => DataChannelTests._handleStressReport(peerId, msg));
         conn.registerHandler('dc-mtu-probe', (peerId, msg) => DataChannelTests._handleMtuProbe(peerId, msg));
         conn.registerHandler('dc-mtu-ack', (peerId, msg) => DataChannelTests._handleMtuAck(peerId, msg));
+        conn.registerHandler('dc-order-start', (peerId, msg) => DataChannelTests._handleOrderStart(peerId, msg));
+        conn.registerHandler('dc-order-test', (peerId, msg) => DataChannelTests._handleOrderTest(peerId, msg));
+        conn.registerHandler('dc-order-report', (peerId, msg) => DataChannelTests._handleOrderReport(peerId, msg));
+        conn.registerDataChannelHandler('dc-test-unordered', (dc) => DataChannelTests._handleUnorderedChannel(conn.peerId, dc));
+        conn.registerHandler('dc-reliable-start', (peerId, msg) => DataChannelTests._handleReliableStart(peerId, msg));
+        conn.registerHandler('dc-reliable-test', (peerId, msg) => DataChannelTests._handleReliableTest(peerId, msg));
+        conn.registerHandler('dc-reliable-done', (peerId, msg) => DataChannelTests._handleReliableDone(peerId, msg));
+        conn.registerHandler('dc-reliable-report', (peerId, msg) => DataChannelTests._handleReliableReport(peerId, msg));
+        conn.registerDataChannelHandler('dc-test-unreliable', (dc) => DataChannelTests._handleUnreliableChannel(conn.peerId, dc));
     },
 
     _getPeer() {
@@ -186,8 +195,8 @@ const DataChannelTests = {
 
     // === ORDERED VS UNORDERED ===
 
-    _orderResolves: {},
-    _orderReceived: {},
+    _orderReceiverState: null,
+    _orderReportResolve: null,
 
     async testOrdered() {
         const peer = DataChannelTests._getPeer();
@@ -199,6 +208,9 @@ const DataChannelTests = {
         DataChannelTests._log('dc-order-results', 'Testing ordered vs unordered with ' + count + ' messages...\n');
 
         const conn = peer.conn;
+
+        // Tell remote to prepare (sent before DC creation so it arrives first)
+        PeerManager.sendRaw(peer.peerId, { type: 'dc-order-start', count });
 
         // Create an unordered secondary data channel
         let unorderedDc;
@@ -240,21 +252,87 @@ const DataChannelTests = {
         }
         unorderedDc.send(JSON.stringify({ type: 'dc-order-test', channel: 'unordered', seq: -1 }));
 
-        // We measure send time locally (the actual reordering happens on the receiver side)
         const orderedTime = performance.now() - orderedStart;
         const unorderedTime = performance.now() - unorderedStart;
 
         DataChannelTests._log('dc-order-results', '\nSend times:');
         DataChannelTests._log('dc-order-results', '  Ordered:   ' + orderedTime.toFixed(1) + ' ms');
         DataChannelTests._log('dc-order-results', '  Unordered: ' + unorderedTime.toFixed(1) + ' ms');
-        DataChannelTests._log('dc-order-results', '\nNote: Reordering is measured on the receiver side.');
-        DataChannelTests._log('dc-order-results', 'Check the remote peer\'s Data Channel tab for reception results.');
+        DataChannelTests._log('dc-order-results', '\nWaiting for receiver report...');
 
         unorderedDc.close();
+
+        // Wait for receiver to report back (10 s timeout)
+        await new Promise((resolve) => {
+            DataChannelTests._orderReportResolve = resolve;
+            setTimeout(() => {
+                if (DataChannelTests._running) {
+                    DataChannelTests._log('dc-order-results', '(No report received — check remote peer)');
+                    DataChannelTests._running = false;
+                }
+                resolve();
+            }, 10000);
+        });
+        DataChannelTests._orderReportResolve = null;
+    },
+
+    _handleOrderStart(peerId, msg) {
+        DataChannelTests._orderReceiverState = {
+            peerId,
+            count: msg.count,
+            ordered: { received: 0, lastSeq: -1, outOfOrder: 0, done: false },
+            unordered: { received: 0, lastSeq: -1, outOfOrder: 0, done: false }
+        };
+    },
+
+    _handleOrderTest(peerId, msg) {
+        const state = DataChannelTests._orderReceiverState;
+        if (!state || msg.channel !== 'ordered') return;
+        if (msg.seq === -1) { state.ordered.done = true; DataChannelTests._maybeSendOrderReport(); return; }
+        state.ordered.received++;
+        if (msg.seq < state.ordered.lastSeq) state.ordered.outOfOrder++;
+        state.ordered.lastSeq = msg.seq;
+    },
+
+    _handleUnorderedChannel(peerId, dc) {
+        dc.onmessage = (e) => {
+            const state = DataChannelTests._orderReceiverState;
+            if (!state) return;
+            let msg;
+            try { msg = JSON.parse(e.data); } catch (err) { return; }
+            if (msg.seq === -1) { state.unordered.done = true; DataChannelTests._maybeSendOrderReport(); return; }
+            state.unordered.received++;
+            if (msg.seq < state.unordered.lastSeq) state.unordered.outOfOrder++;
+            state.unordered.lastSeq = msg.seq;
+        };
+    },
+
+    _maybeSendOrderReport() {
+        const state = DataChannelTests._orderReceiverState;
+        if (!state || !state.ordered.done || !state.unordered.done) return;
+        PeerManager.sendRaw(state.peerId, {
+            type: 'dc-order-report',
+            count: state.count,
+            orderedReceived: state.ordered.received,
+            orderedOutOfOrder: state.ordered.outOfOrder,
+            unorderedReceived: state.unordered.received,
+            unorderedOutOfOrder: state.unordered.outOfOrder
+        });
+        DataChannelTests._orderReceiverState = null;
+    },
+
+    _handleOrderReport(peerId, msg) {
+        DataChannelTests._log('dc-order-results', '\nReceiver report:');
+        DataChannelTests._log('dc-order-results', '  Ordered:   ' + msg.orderedReceived + '/' + msg.count + ' received, ' + msg.orderedOutOfOrder + ' out of order');
+        DataChannelTests._log('dc-order-results', '  Unordered: ' + msg.unorderedReceived + '/' + msg.count + ' received, ' + msg.unorderedOutOfOrder + ' out of order');
         DataChannelTests._running = false;
+        if (DataChannelTests._orderReportResolve) { DataChannelTests._orderReportResolve(); DataChannelTests._orderReportResolve = null; }
     },
 
     // === RELIABLE VS UNRELIABLE ===
+
+    _reliableReceiverState: null,
+    _reliableReportResolve: null,
 
     async testReliable() {
         const peer = DataChannelTests._getPeer();
@@ -317,11 +395,75 @@ const DataChannelTests = {
         DataChannelTests._log('dc-reliable-results', '\nSend times:');
         DataChannelTests._log('dc-reliable-results', '  Reliable:   ' + reliableTime.toFixed(1) + ' ms');
         DataChannelTests._log('dc-reliable-results', '  Unreliable: ' + unreliableTime.toFixed(1) + ' ms');
-        DataChannelTests._log('dc-reliable-results', '\nDelivery rate measured on the receiver side.');
-        DataChannelTests._log('dc-reliable-results', 'Check the remote peer for reception results.');
+        DataChannelTests._log('dc-reliable-results', '\nWaiting for receiver report...');
 
         unreliableDc.close();
+
+        // Wait 1 s then signal done via reliable channel (handles lost unreliable sentinel)
+        await new Promise(r => setTimeout(r, 1000));
+        PeerManager.sendRaw(peer.peerId, { type: 'dc-reliable-done' });
+
+        // Wait for receiver to report back (10 s timeout)
+        await new Promise((resolve) => {
+            DataChannelTests._reliableReportResolve = resolve;
+            setTimeout(() => {
+                if (DataChannelTests._running) {
+                    DataChannelTests._log('dc-reliable-results', '(No report received — check remote peer)');
+                    DataChannelTests._running = false;
+                }
+                resolve();
+            }, 10000);
+        });
+        DataChannelTests._reliableReportResolve = null;
+    },
+
+    _handleReliableStart(peerId, msg) {
+        DataChannelTests._reliableReceiverState = {
+            peerId,
+            count: msg.count,
+            reliable: { received: 0 },
+            unreliable: { received: 0 }
+        };
+    },
+
+    _handleReliableTest(peerId, msg) {
+        const state = DataChannelTests._reliableReceiverState;
+        if (!state || msg.seq === -1) return;
+        if (msg.channel === 'reliable') state.reliable.received++;
+    },
+
+    _handleUnreliableChannel(peerId, dc) {
+        dc.onmessage = (e) => {
+            const state = DataChannelTests._reliableReceiverState;
+            if (!state) return;
+            let msg;
+            try { msg = JSON.parse(e.data); } catch (err) { return; }
+            if (msg.seq !== -1) state.unreliable.received++;
+        };
+    },
+
+    _handleReliableDone(peerId) {
+        const state = DataChannelTests._reliableReceiverState;
+        if (!state) return;
+        const loss = state.count - state.unreliable.received;
+        const lossRate = (loss / state.count * 100).toFixed(1);
+        PeerManager.sendRaw(peerId, {
+            type: 'dc-reliable-report',
+            count: state.count,
+            reliableReceived: state.reliable.received,
+            unreliableReceived: state.unreliable.received,
+            loss,
+            lossRate
+        });
+        DataChannelTests._reliableReceiverState = null;
+    },
+
+    _handleReliableReport(peerId, msg) {
+        DataChannelTests._log('dc-reliable-results', '\nReceiver report:');
+        DataChannelTests._log('dc-reliable-results', '  Reliable:   ' + msg.reliableReceived + '/' + msg.count + ' received (' + (msg.reliableReceived === msg.count ? 'no loss' : 'LOSS') + ')');
+        DataChannelTests._log('dc-reliable-results', '  Unreliable: ' + msg.unreliableReceived + '/' + msg.count + ' received (' + msg.lossRate + '% loss)');
         DataChannelTests._running = false;
+        if (DataChannelTests._reliableReportResolve) { DataChannelTests._reliableReportResolve(); DataChannelTests._reliableReportResolve = null; }
     },
 
     // === STRESS TEST ===

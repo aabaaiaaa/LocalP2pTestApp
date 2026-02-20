@@ -3,6 +3,7 @@
 const App = {
     role: null,
     _blobUrls: [],
+    _localIps: null,    // cached local IPs gathered via ICE
     _typingPeers: new Map(),    // peerId -> typing state
     _typingTimeout: null,       // local typing debounce
     _isTyping: false,
@@ -165,11 +166,17 @@ const App = {
         App.setState('creating-offer');
 
         try {
-            const { connId, desc } = await PeerManager.createOffer();
+            const [{ connId, desc }, localIps] = await Promise.all([
+                PeerManager.createOffer(),
+                App._getLocalIPs()
+            ]);
             App._currentConnId = connId;
-            const encoded = Signal.encode(desc);
+            const signalStr = Signal.encode(desc);
+            const encoded = App._addLocalIpToPayload(signalStr, localIps[0] || null);
             console.log('Offer encoded:', encoded.length, 'chars');
             QR.generate('qr-offer', encoded);
+            const ipEl = document.getElementById('local-ip-display');
+            if (ipEl) ipEl.textContent = localIps.length ? 'Your IP: ' + localIps[0] : '';
             App.setState('show-offer-qr');
         } catch (err) {
             App.showError('Failed to create offer: ' + err.message);
@@ -182,7 +189,8 @@ const App = {
         try {
             const data = await QR.scan('scanner-answer');
             App.setState('connecting');
-            const { sdp } = Signal.decode(data);
+            const { encoded } = App._parseQrPayload(data);
+            const { sdp } = Signal.decode(encoded);
             await PeerManager.processAnswer(App._currentConnId, sdp);
         } catch (err) {
             App.showError('Failed to scan answer: ' + err.message);
@@ -199,12 +207,18 @@ const App = {
         try {
             const data = await QR.scan('scanner-offer');
             App.setState('creating-answer');
-            const { sdp } = Signal.decode(data);
-            const { connId, desc } = await PeerManager.processOfferAndCreateAnswer(sdp);
+            const { encoded: offerEncoded, remoteIp: offererIp } = App._parseQrPayload(data);
+            const { sdp } = Signal.decode(offerEncoded);
+            const [{ connId, desc }, localIps] = await Promise.all([
+                PeerManager.processOfferAndCreateAnswer(sdp),
+                App._getLocalIPs()
+            ]);
             App._currentConnId = connId;
-            const encoded = Signal.encode(desc);
+            const signalStr = Signal.encode(desc);
+            const encoded = App._addLocalIpToPayload(signalStr, localIps[0] || null);
             console.log('Answer encoded:', encoded.length, 'chars');
             QR.generate('qr-answer', encoded);
+            App._showSubnetWarning('subnet-warning', localIps[0] || null, offererIp);
             App.setState('show-answer-qr');
         } catch (err) {
             App.showError('Failed to process offer: ' + err.message);
@@ -770,10 +784,16 @@ const App = {
     async modalCreateOffer() {
         App._showModalStep('modal-creating');
         try {
-            const { connId, desc } = await PeerManager.createOffer();
+            const [{ connId, desc }, localIps] = await Promise.all([
+                PeerManager.createOffer(),
+                App._getLocalIPs()
+            ]);
             App._currentModalConnId = connId;
-            const encoded = Signal.encode(desc);
+            const signalStr = Signal.encode(desc);
+            const encoded = App._addLocalIpToPayload(signalStr, localIps[0] || null);
             QR.generate('modal-qr-offer', encoded);
+            const ipEl = document.getElementById('modal-local-ip-display');
+            if (ipEl) ipEl.textContent = localIps.length ? 'Your IP: ' + localIps[0] : '';
             App._showModalStep('modal-show-offer');
         } catch (err) {
             console.error('Modal offer failed:', err);
@@ -786,11 +806,17 @@ const App = {
         try {
             const data = await QR.scan('modal-scanner-offer');
             App._showModalStep('modal-creating-answer');
-            const { sdp } = Signal.decode(data);
-            const { connId, desc } = await PeerManager.processOfferAndCreateAnswer(sdp);
+            const { encoded: offerEncoded, remoteIp: offererIp } = App._parseQrPayload(data);
+            const { sdp } = Signal.decode(offerEncoded);
+            const [{ connId, desc }, localIps] = await Promise.all([
+                PeerManager.processOfferAndCreateAnswer(sdp),
+                App._getLocalIPs()
+            ]);
             App._currentModalConnId = connId;
-            const encoded = Signal.encode(desc);
+            const signalStr = Signal.encode(desc);
+            const encoded = App._addLocalIpToPayload(signalStr, localIps[0] || null);
             QR.generate('modal-qr-answer', encoded);
+            App._showSubnetWarning('modal-subnet-warning', localIps[0] || null, offererIp);
             App._showModalStep('modal-show-answer');
         } catch (err) {
             console.error('Modal scan offer failed:', err);
@@ -804,7 +830,8 @@ const App = {
         try {
             const data = await QR.scan('modal-scanner-answer');
             App._showModalStep('modal-connecting');
-            const { sdp } = Signal.decode(data);
+            const { encoded } = App._parseQrPayload(data);
+            const { sdp } = Signal.decode(encoded);
             await PeerManager.processAnswer(App._currentModalConnId, sdp);
         } catch (err) {
             console.error('Modal scan answer failed:', err);
@@ -987,6 +1014,79 @@ const App = {
     },
 
     // === UTILITY ===
+
+    // Gather host-candidate IPs via a throwaway RTCPeerConnection.
+    // Chrome with mDNS privacy may return no real IPs — resolves to [] in that case.
+    // Result is cached for the page lifetime since local IPs don't change mid-session.
+    async _getLocalIPs() {
+        if (App._localIps !== null) return App._localIps;
+        const ips = [];
+        let pc;
+        try {
+            pc = new RTCPeerConnection({ iceServers: [] });
+            pc.createDataChannel('x');
+            await pc.setLocalDescription(await pc.createOffer());
+            await new Promise(resolve => {
+                const t = setTimeout(resolve, 2000);
+                pc.onicecandidate = e => {
+                    if (!e.candidate) { clearTimeout(t); resolve(); return; }
+                    const m = e.candidate.candidate.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/);
+                    if (m && !m[1].startsWith('127.') && !m[1].startsWith('169.254.')) {
+                        if (!ips.includes(m[1])) ips.push(m[1]);
+                    }
+                };
+            });
+        } catch (_) { /* ignore */ } finally {
+            if (pc) { try { pc.close(); } catch (e) { /* ignore close errors */ } }
+        }
+        App._localIps = ips;
+        return ips;
+    },
+
+    // Return the /24 prefix of an IP (first three octets), or null if not parseable.
+    _subnet24(ip) {
+        const p = ip.split('.');
+        return p.length === 4 ? p[0] + '.' + p[1] + '.' + p[2] : null;
+    },
+
+    // Append local IP to a Signal-encoded QR string.
+    // '|' never appears in base64url so it's safe as a separator.
+    _addLocalIpToPayload(encoded, ip) {
+        return ip ? encoded + '|' + ip : encoded;
+    },
+
+    // Extract the remote IP (if embedded) from a scanned QR payload.
+    // Returns { encoded, remoteIp } where remoteIp may be null.
+    _parseQrPayload(data) {
+        const pipe = data.lastIndexOf('|');
+        if (pipe !== -1) {
+            const maybeIp = data.slice(pipe + 1);
+            if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(maybeIp)) {
+                return { encoded: data.slice(0, pipe), remoteIp: maybeIp };
+            }
+        }
+        return { encoded: data, remoteIp: null };
+    },
+
+    // Show a subnet mismatch warning in the given element if the two IPs are
+    // on different /24 subnets.  Clears the element otherwise.
+    _showSubnetWarning(elementId, localIp, remoteIp) {
+        const el = document.getElementById(elementId);
+        if (!el) return;
+        if (localIp && remoteIp) {
+            const localSub = App._subnet24(localIp);
+            const remoteSub = App._subnet24(remoteIp);
+            if (localSub && remoteSub && localSub !== remoteSub) {
+                el.textContent = 'Warning: devices appear to be on different networks (' +
+                    localIp + ' vs ' + remoteIp +
+                    '). Check both devices are on the same WiFi.';
+                el.className = 'subnet-warning';
+                return;
+            }
+        }
+        el.textContent = '';
+        el.className = '';
+    },
 
     _notifyUnread() {
         const tab = document.querySelector('.tab[data-tab="messages"]');
@@ -1286,7 +1386,8 @@ const App = {
         try {
             const data = await QR.scan('modal-scanner-answer');
             App._showModalStep('modal-connecting');
-            const { sdp } = Signal.decode(data);
+            const { encoded } = App._parseQrPayload(data);
+            const { sdp } = Signal.decode(encoded);
             await PeerManager.processAnswer(App._currentModalConnId, sdp);
         } catch (err) {
             console.error('Reconnect scan answer failed:', err);
@@ -1360,11 +1461,17 @@ const App = {
             try {
                 const data = await QR.scan('scanner-offer');
                 App.setState('creating-answer');
-                const { sdp } = Signal.decode(data);
-                const { connId, desc } = await PeerManager.processOfferAndCreateAnswer(sdp);
+                const { encoded: offerEncoded, remoteIp: offererIp } = App._parseQrPayload(data);
+                const { sdp } = Signal.decode(offerEncoded);
+                const [{ connId, desc }, localIps] = await Promise.all([
+                    PeerManager.processOfferAndCreateAnswer(sdp),
+                    App._getLocalIPs()
+                ]);
                 App._currentConnId = connId;
-                const encoded = Signal.encode(desc);
+                const signalStr = Signal.encode(desc);
+                const encoded = App._addLocalIpToPayload(signalStr, localIps[0] || null);
                 QR.generate('qr-answer', encoded);
+                App._showSubnetWarning('subnet-warning', localIps[0] || null, offererIp);
                 App.setState('show-answer-qr');
             } catch (err) {
                 App.showError('Failed to reconnect: ' + err.message);
