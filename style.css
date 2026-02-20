@@ -63,6 +63,7 @@ body[data-state="error"] #view-error { display: flex; }
 h1 { font-size: 2rem; font-weight: 700; }
 h2 { font-size: 1.25rem; font-weight: 600; }
 .subtitle { color: var(--text-muted); max-width: 280px; line-height: 1.5; }
+.build-version { color: var(--text-muted); font-size: 0.6875rem; opacity: 0.6; margin-top: -8px; }
 .hint { color: var(--text-muted); font-size: 0.875rem; }
 .subnet-warning { color: var(--warning); font-size: 0.875rem; }
 .error-text { color: var(--danger); line-height: 1.5; }
@@ -1163,6 +1164,21 @@ h2 { font-size: 1.25rem; font-weight: 600; }
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--surface-alt); border-radius: 2px; }
+
+/* Image lightbox */
+.lightbox-overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.85);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 99997;
+    cursor: zoom-out;
+}
+.lightbox-img {
+    max-width: 95vw; max-height: 95dvh;
+    border-radius: 8px;
+    object-fit: contain;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+}
 
 /* Remote Control */
 #rc-controlled-banner {

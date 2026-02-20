@@ -19,6 +19,7 @@
         "MediaExtended": "writable",
         "Tools": "writable",
         "IceConfig": "writable",
+        "BUILD_INFO": "readonly",
         "pako": "readonly",
         "QRCode": "readonly",
         "Html5Qrcode": "readonly"

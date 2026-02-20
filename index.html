@@ -12,6 +12,7 @@
     <section id="view-home" class="view">
         <h1>P2P Connect</h1>
         <p class="subtitle">Connect devices directly using QR codes. No server required.</p>
+        <p class="build-version" id="build-version"></p>
         <div class="name-input-group">
             <input type="text" id="device-name" placeholder="Your name (optional)" autocomplete="off">
             <p class="hint" id="name-preview"></p>
@@ -676,6 +677,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
     <!-- App modules -->
+    <script src="version.js"></script>
     <script src="signal.js"></script>
     <script src="qr.js"></script>
     <script src="peer.js"></script>

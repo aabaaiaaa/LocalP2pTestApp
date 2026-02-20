@@ -19,6 +19,12 @@ const App = {
     _reconnectEncodedSdp: null,
 
     init() {
+        // Build version
+        if (BUILD_INFO.version !== 'dev') {
+            const vEl = document.getElementById('build-version');
+            if (vEl) vEl.textContent = BUILD_INFO.version + ' · ' + BUILD_INFO.date;
+        }
+
         // Generate preview name
         PeerManager.init('');
         IceConfig.init();
@@ -520,7 +526,7 @@ const App = {
 
             const img = document.createElement('img');
             img.src = dataUrl;
-            img.addEventListener('click', () => window.open(dataUrl, '_blank'));
+            img.addEventListener('click', () => App._openLightbox(dataUrl));
 
             msg.appendChild(img);
             group.appendChild(sender);
@@ -535,7 +541,7 @@ const App = {
 
             const img = document.createElement('img');
             img.src = dataUrl;
-            img.addEventListener('click', () => window.open(dataUrl, '_blank'));
+            img.addEventListener('click', () => App._openLightbox(dataUrl));
 
             div.appendChild(img);
             group.appendChild(div);
@@ -1501,6 +1507,23 @@ const App = {
             // iOS Safari
             videoEl.webkitEnterFullscreen();
         }
+    },
+
+    _openLightbox(dataUrl) {
+        const overlay = document.createElement('div');
+        overlay.className = 'lightbox-overlay';
+
+        const img = document.createElement('img');
+        img.src = dataUrl;
+        img.className = 'lightbox-img';
+
+        overlay.appendChild(img);
+        document.body.appendChild(overlay);
+
+        const close = () => overlay.remove();
+        overlay.addEventListener('click', close);
+        const onKey = (e) => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKey); } };
+        document.addEventListener('keydown', onKey);
     },
 
     formatBytes(bytes) {
