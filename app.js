@@ -20,9 +20,11 @@ const App = {
 
     init() {
         // Build version
-        if (BUILD_INFO.version !== 'dev') {
-            const vEl = document.getElementById('build-version');
-            if (vEl) vEl.textContent = BUILD_INFO.version + ' · ' + BUILD_INFO.date;
+        const vEl = document.getElementById('build-version');
+        if (vEl) {
+            vEl.textContent = BUILD_INFO.version === 'dev'
+                ? 'dev build'
+                : BUILD_INFO.version + ' · ' + BUILD_INFO.date;
         }
 
         // Generate preview name
