@@ -69,9 +69,14 @@ const App = {
             if (peerId && !SpeedTest._running) SpeedTest.runFull(peerId);
         });
 
+        // Local video fullscreen
+        document.getElementById('btn-local-fullscreen').addEventListener('click', () =>
+            App._requestFullscreen(document.getElementById('local-video')));
+
         // Connected — media
-        document.getElementById('btn-start-video').addEventListener('click', () => App.startMedia(true));
-        document.getElementById('btn-start-audio').addEventListener('click', () => App.startMedia(false));
+        document.getElementById('btn-start-video-audio').addEventListener('click', () => App.startMedia('video-audio'));
+        document.getElementById('btn-start-video-only').addEventListener('click', () => App.startMedia('video-only'));
+        document.getElementById('btn-start-audio-only').addEventListener('click', () => App.startMedia('audio-only'));
         document.getElementById('btn-stop-media').addEventListener('click', () => App.stopMedia());
 
         // Disconnect / error
@@ -450,6 +455,7 @@ const App = {
         }
 
         log.scrollTop = log.scrollHeight;
+        if (origin === 'remote') App._notifyUnread();
     },
 
     displaySystemMessage(text) {
@@ -499,6 +505,7 @@ const App = {
         }
 
         log.scrollTop = log.scrollHeight;
+        if (origin === 'remote') App._notifyUnread();
     },
 
     // === CAMERA ===
@@ -632,18 +639,24 @@ const App = {
 
     // === MEDIA ===
 
-    async startMedia(video) {
+    async startMedia(mode) {
         const peerId = App._getSelectedPeer('media-peer-select');
         if (!peerId) {
             alert('No peer selected');
             return;
         }
 
+        const constraintsMap = {
+            'video-audio': { video: true, audio: true },
+            'video-only':  { video: true },
+            'audio-only':  { audio: true }
+        };
+
         try {
-            const stream = await PeerManager.startMedia(peerId, video);
+            const stream = await PeerManager.startMedia(peerId, constraintsMap[mode]);
             document.getElementById('local-video').srcObject = stream;
-            document.getElementById('btn-start-video').classList.add('hidden');
-            document.getElementById('btn-start-audio').classList.add('hidden');
+            ['btn-start-video-audio', 'btn-start-video-only', 'btn-start-audio-only'].forEach(id =>
+                document.getElementById(id).classList.add('hidden'));
             document.getElementById('btn-stop-media').classList.remove('hidden');
             document.getElementById('media-stats').classList.remove('hidden');
         } catch (err) {
@@ -657,15 +670,21 @@ const App = {
             try { PeerManager.stopMedia(peerId); } catch (e) { /* peer may be gone */ }
         }
         document.getElementById('local-video').srcObject = null;
-        // Clear all remote videos
-        document.getElementById('remote-videos').innerHTML = '';
-        document.getElementById('btn-start-video').classList.remove('hidden');
-        document.getElementById('btn-start-audio').classList.remove('hidden');
+        ['btn-start-video-audio', 'btn-start-video-only', 'btn-start-audio-only'].forEach(id =>
+            document.getElementById(id).classList.remove('hidden'));
         document.getElementById('btn-stop-media').classList.add('hidden');
-        document.getElementById('media-stats').classList.add('hidden');
+        // Keep remote video and stats visible if the remote is still streaming
+        const hasRemoteStream = !!document.getElementById('remote-videos').querySelector('video');
+        if (!hasRemoteStream) {
+            document.getElementById('media-stats').classList.add('hidden');
+        }
     },
 
     handleRemoteStream(peerId, stream) {
+        // Ensure stats polling is running even if the local user hasn't started their own stream
+        const conn = PeerManager.get(peerId);
+        if (conn) conn.ensureStatsPolling();
+
         const container = document.getElementById('remote-videos');
         // Remove existing video for this peer if any
         const existing = document.getElementById('remote-video-' + peerId);
@@ -684,8 +703,15 @@ const App = {
         label.className = 'video-label';
         label.textContent = App._peerNames.get(peerId) || 'Peer';
 
+        const fsBtn = document.createElement('button');
+        fsBtn.className = 'btn-fullscreen';
+        fsBtn.title = 'Fullscreen';
+        fsBtn.innerHTML = '&#x26F6;';
+        fsBtn.addEventListener('click', () => App._requestFullscreen(video));
+
         wrapper.appendChild(video);
         wrapper.appendChild(label);
+        wrapper.appendChild(fsBtn);
         container.appendChild(wrapper);
     },
 
@@ -944,11 +970,36 @@ const App = {
 
     // === UTILITY ===
 
+    _notifyUnread() {
+        const tab = document.querySelector('.tab[data-tab="messages"]');
+        if (!tab || tab.classList.contains('active')) return;
+        tab.classList.add('unread');
+        try {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.type = 'sine';
+            osc.frequency.value = 880;
+            gain.gain.setValueAtTime(0, ctx.currentTime);
+            gain.gain.linearRampToValueAtTime(0.25, ctx.currentTime + 0.01);
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
+            osc.start(ctx.currentTime);
+            osc.stop(ctx.currentTime + 0.25);
+        } catch (e) { /* Web Audio unavailable */ }
+    },
+
     switchTab(name) {
         document.querySelectorAll('.tab').forEach(t =>
             t.classList.toggle('active', t.dataset.tab === name));
         document.querySelectorAll('.tab-content').forEach(c =>
             c.classList.toggle('active', c.id === 'tab-' + name));
+
+        if (name === 'messages') {
+            const tab = document.querySelector('.tab[data-tab="messages"]');
+            if (tab) tab.classList.remove('unread');
+        }
 
         // Redraw mesh when switching to network tab
         if (name === 'network') {
@@ -1287,6 +1338,17 @@ const App = {
         document.getElementById('reconnect-prompt').classList.add('hidden');
         document.querySelector('#view-home .button-group').classList.remove('hidden');
         document.querySelector('#view-home .name-input-group').classList.remove('hidden');
+    },
+
+    _requestFullscreen(videoEl) {
+        if (videoEl.requestFullscreen) {
+            videoEl.requestFullscreen();
+        } else if (videoEl.webkitRequestFullscreen) {
+            videoEl.webkitRequestFullscreen();
+        } else if (videoEl.webkitEnterFullscreen) {
+            // iOS Safari
+            videoEl.webkitEnterFullscreen();
+        }
     },
 
     formatBytes(bytes) {

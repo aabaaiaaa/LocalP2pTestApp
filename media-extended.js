@@ -3,14 +3,20 @@
 const MediaExtended = {
     _screenStream: null,
     _audioCtx: null,
-    _analyser: null,
+    _streamSources: new Map(),  // MediaStream -> AnalyserNode
     _vizAnimFrame: null,
     _recorder: null,
     _recordChunks: [],
 
     init() {
         document.getElementById('btn-media-codecs').addEventListener('click', () => MediaExtended.detectCodecs());
-        document.getElementById('btn-screen-share').addEventListener('click', () => MediaExtended.startScreenShare());
+        const screenShareBtn = document.getElementById('btn-screen-share');
+        if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
+            screenShareBtn.addEventListener('click', () => MediaExtended.startScreenShare());
+        } else {
+            screenShareBtn.disabled = true;
+            screenShareBtn.textContent = 'Screen Share (not supported)';
+        }
         document.getElementById('btn-screen-stop').addEventListener('click', () => MediaExtended.stopScreenShare());
         document.getElementById('btn-audio-viz').addEventListener('click', () => MediaExtended.startVisualizer());
         document.getElementById('btn-audio-viz-stop').addEventListener('click', () => MediaExtended.stopVisualizer());
@@ -71,6 +77,11 @@ const MediaExtended = {
     // === SCREEN SHARING ===
 
     async startScreenShare() {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+            alert('Screen sharing is not supported on this device.');
+            return;
+        }
+
         const peerId = document.getElementById('media-peer-select').value;
         if (!peerId) { alert('No peer selected'); return; }
 
@@ -111,45 +122,47 @@ const MediaExtended = {
 
     // === AUDIO VISUALIZER ===
 
-    startVisualizer() {
-        // Find a remote audio stream
-        const remoteVideos = document.getElementById('remote-videos');
-        const videoEl = remoteVideos.querySelector('video');
-        if (!videoEl || !videoEl.srcObject) {
-            alert('No active remote stream. Start a media call first.');
-            return;
-        }
-
-        const stream = videoEl.srcObject;
-        const audioTracks = stream.getAudioTracks();
-        if (audioTracks.length === 0) {
-            alert('No audio track in remote stream');
-            return;
-        }
+    _getOrCreateAnalyser(stream) {
+        if (!stream) return null;
+        const audioTracks = stream.getAudioTracks().filter(t => t.readyState === 'live');
+        if (audioTracks.length === 0) return null;
 
         if (!MediaExtended._audioCtx) {
             MediaExtended._audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         }
+        if (MediaExtended._audioCtx.state === 'suspended') {
+            MediaExtended._audioCtx.resume();
+        }
 
-        const ctx = MediaExtended._audioCtx;
-        const source = ctx.createMediaStreamSource(stream);
-        const analyser = ctx.createAnalyser();
-        analyser.fftSize = 256;
-        source.connect(analyser);
-        MediaExtended._analyser = analyser;
+        if (!MediaExtended._streamSources.has(stream)) {
+            const ctx = MediaExtended._audioCtx;
+            const source = ctx.createMediaStreamSource(stream);
+            const analyser = ctx.createAnalyser();
+            analyser.fftSize = 256;
+            source.connect(analyser);
+            MediaExtended._streamSources.set(stream, analyser);
+        }
+        return MediaExtended._streamSources.get(stream);
+    },
+
+    startVisualizer() {
+        if (MediaExtended._vizAnimFrame) return;
 
         document.getElementById('btn-audio-viz').classList.add('hidden');
         document.getElementById('btn-audio-viz-stop').classList.remove('hidden');
 
         const canvas = document.getElementById('audio-visualizer');
         const canvasCtx = canvas.getContext('2d');
-        const bufferLength = analyser.frequencyBinCount;
-        const dataArray = new Uint8Array(bufferLength);
 
         const draw = () => {
             MediaExtended._vizAnimFrame = requestAnimationFrame(draw);
 
-            analyser.getByteFrequencyData(dataArray);
+            const localStream = document.getElementById('local-video').srcObject;
+            const remoteVideoEl = document.getElementById('remote-videos').querySelector('video');
+            const remoteStream = remoteVideoEl ? remoteVideoEl.srcObject : null;
+
+            const localAnalyser = MediaExtended._getOrCreateAnalyser(localStream);
+            const remoteAnalyser = MediaExtended._getOrCreateAnalyser(remoteStream);
 
             const dpr = window.devicePixelRatio || 1;
             const rect = canvas.getBoundingClientRect();
@@ -163,18 +176,50 @@ const MediaExtended = {
             canvasCtx.fillStyle = '#0f172a';
             canvasCtx.fillRect(0, 0, w, h);
 
-            const barWidth = (w / bufferLength) * 2.5;
-            let x = 0;
-
-            for (let i = 0; i < bufferLength; i++) {
-                const barHeight = (dataArray[i] / 255) * h;
-
-                const hue = (i / bufferLength) * 240;
-                canvasCtx.fillStyle = 'hsl(' + hue + ', 70%, 50%)';
-                canvasCtx.fillRect(x, h - barHeight, barWidth, barHeight);
-
-                x += barWidth + 1;
+            if (!localAnalyser && !remoteAnalyser) {
+                canvasCtx.fillStyle = '#475569';
+                canvasCtx.font = '13px -apple-system, sans-serif';
+                canvasCtx.textAlign = 'center';
+                canvasCtx.textBaseline = 'middle';
+                canvasCtx.fillText('Start streaming or receive a stream to see a visualisation', w / 2, h / 2);
+                return;
             }
+
+            const panels = [];
+            if (localAnalyser) panels.push({ analyser: localAnalyser, label: 'You' });
+            if (remoteAnalyser) panels.push({ analyser: remoteAnalyser, label: 'Remote' });
+
+            const panelW = w / panels.length;
+
+            panels.forEach((panel, idx) => {
+                const ox = idx * panelW;
+
+                if (idx > 0) {
+                    canvasCtx.fillStyle = '#334155';
+                    canvasCtx.fillRect(ox, 0, 1, h);
+                }
+
+                const bufferLength = panel.analyser.frequencyBinCount;
+                const dataArray = new Uint8Array(bufferLength);
+                panel.analyser.getByteFrequencyData(dataArray);
+
+                const barWidth = (panelW / bufferLength) * 2.5;
+                let x = ox;
+
+                for (let i = 0; i < bufferLength; i++) {
+                    const barHeight = (dataArray[i] / 255) * (h * 0.85);
+                    const hue = (i / bufferLength) * 240;
+                    canvasCtx.fillStyle = 'hsl(' + hue + ', 70%, 50%)';
+                    canvasCtx.fillRect(x, h - barHeight, barWidth, barHeight);
+                    x += barWidth + 1;
+                }
+
+                canvasCtx.fillStyle = 'rgba(148, 163, 184, 0.8)';
+                canvasCtx.font = '11px -apple-system, sans-serif';
+                canvasCtx.textAlign = 'left';
+                canvasCtx.textBaseline = 'top';
+                canvasCtx.fillText(panel.label, ox + 6, 4);
+            });
         };
 
         draw();
@@ -185,12 +230,15 @@ const MediaExtended = {
             cancelAnimationFrame(MediaExtended._vizAnimFrame);
             MediaExtended._vizAnimFrame = null;
         }
-        MediaExtended._analyser = null;
+        MediaExtended._streamSources = new Map();
+        if (MediaExtended._audioCtx) {
+            MediaExtended._audioCtx.close();
+            MediaExtended._audioCtx = null;
+        }
 
         document.getElementById('btn-audio-viz').classList.remove('hidden');
         document.getElementById('btn-audio-viz-stop').classList.add('hidden');
 
-        // Clear canvas
         const canvas = document.getElementById('audio-visualizer');
         const ctx = canvas.getContext('2d');
         ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -298,21 +346,40 @@ const MediaExtended = {
                     height: { ideal: step.height }
                 });
 
+                // Snapshot bytesSent before the wait
+                const statsBefore = await pc.getStats();
+                let bytesBefore = 0;
+                statsBefore.forEach((report) => {
+                    if (report.type === 'outbound-rtp' && report.kind === 'video') {
+                        bytesBefore = report.bytesSent || 0;
+                    }
+                });
+
                 // Wait for adaptation
                 await new Promise(r => setTimeout(r, 3000));
 
-                // Read stats
+                // Read stats after wait
                 const stats = await pc.getStats();
                 let actualRes = '?';
-                let bitrate = '?';
+                let bytesAfter = 0;
 
                 stats.forEach((report) => {
                     if (report.type === 'outbound-rtp' && report.kind === 'video') {
                         if (report.frameWidth && report.frameHeight) {
                             actualRes = report.frameWidth + 'x' + report.frameHeight;
                         }
+                        bytesAfter = report.bytesSent || 0;
                     }
                 });
+
+                // Calculate bitrate from delta over the 3s interval
+                let bitrate = '?';
+                if (bytesAfter > bytesBefore) {
+                    const bps = (bytesAfter - bytesBefore) * 8 / 3;
+                    bitrate = bps >= 1000000
+                        ? (bps / 1000000).toFixed(1) + ' Mbps'
+                        : Math.round(bps / 1000) + ' kbps';
+                }
 
                 MediaExtended._log('res-ladder-results',
                     step.label.padEnd(11) +

@@ -278,14 +278,16 @@
                 <select id="media-peer-select" class="peer-select"></select>
             </div>
             <div class="media-controls">
-                <button id="btn-start-video" class="btn primary">Start Video</button>
-                <button id="btn-start-audio" class="btn secondary">Audio Only</button>
+                <button id="btn-start-video-audio" class="btn primary">Video + Audio</button>
+                <button id="btn-start-video-only" class="btn secondary">Video Only</button>
+                <button id="btn-start-audio-only" class="btn secondary">Audio Only</button>
                 <button id="btn-stop-media" class="btn danger hidden">Stop</button>
             </div>
             <div class="media-streams">
                 <div class="video-wrapper">
                     <video id="local-video" autoplay muted playsinline></video>
                     <span class="video-label">You</span>
+                    <button class="btn-fullscreen" id="btn-local-fullscreen" title="Fullscreen">&#x26F6;</button>
                 </div>
                 <div id="remote-videos" class="remote-videos-container"></div>
             </div>
@@ -346,7 +348,7 @@
             <details class="test-section">
                 <summary>Audio Visualizer</summary>
                 <div class="test-section-body">
-                    <p class="test-desc">Visualize incoming audio as frequency bars (requires active audio stream).</p>
+                    <p class="test-desc">Visualise local and remote audio as frequency bars. Streams are detected automatically — if none are active a placeholder is shown.</p>
                     <div class="test-controls-row">
                         <button id="btn-audio-viz" class="btn primary">Start Visualizer</button>
                         <button id="btn-audio-viz-stop" class="btn danger hidden">Stop</button>

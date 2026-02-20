@@ -479,8 +479,7 @@ class PeerConnection {
 
     // === MEDIA ===
 
-    async startMedia(video) {
-        const constraints = video ? { video: true, audio: true } : { audio: true };
+    async startMedia(constraints) {
         const stream = await navigator.mediaDevices.getUserMedia(constraints);
         this._localStream = stream;
 
@@ -493,8 +492,8 @@ class PeerConnection {
     }
 
     stopMedia() {
-        this._stopStatsPolling();
-
+        // Only stop local tracks and remove senders — leave stats polling
+        // running so inbound-rtp stats (remote stream) keep updating.
         if (this._localStream) {
             for (const track of this._localStream.getTracks()) {
                 track.stop();
@@ -509,6 +508,10 @@ class PeerConnection {
                 }
             }
         }
+    }
+
+    ensureStatsPolling() {
+        if (!this._statsInterval) this._startStatsPolling();
     }
 
     _startStatsPolling() {
@@ -923,10 +926,10 @@ const PeerManager = {
         return conn.sendPing(id);
     },
 
-    startMedia(peerId, video) {
+    startMedia(peerId, constraints) {
         const conn = PeerManager._connections.get(peerId);
         if (!conn) throw new Error('Peer not found: ' + peerId);
-        return conn.startMedia(video);
+        return conn.startMedia(constraints);
     },
 
     stopMedia(peerId) {
