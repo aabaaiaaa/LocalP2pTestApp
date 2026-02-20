@@ -578,6 +578,21 @@
             </details>
 
             <details class="test-section">
+                <summary>Remote Control</summary>
+                <div class="test-section-body">
+                    <p class="test-desc">Control this page on a remote device — cursor, clicks,
+                        scrolling and key presses are forwarded in real time over the data channel.</p>
+                    <div class="test-controls-row">
+                        <label>Control:</label>
+                        <select id="rc-peer-select" class="peer-select"></select>
+                        <button id="btn-rc-start" class="btn primary">Start Controlling</button>
+                        <button id="btn-rc-stop" class="btn danger hidden">Stop</button>
+                    </div>
+                    <p id="rc-status" class="hint"></p>
+                </div>
+            </details>
+
+            <details class="test-section">
                 <summary>Sensor Streaming</summary>
                 <div class="test-section-body">
                     <p class="test-desc">Stream device accelerometer and gyroscope data to peers.</p>
@@ -652,6 +667,9 @@
         <p id="error-message" class="error-text"></p>
         <button id="btn-retry" class="btn primary">Try Again</button>
     </section>
+
+    <div id="rc-controlled-banner" class="hidden"></div>
+    <div id="rc-ghost-cursor"      class="hidden" aria-hidden="true"></div>
 
     <!-- CDN Libraries -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>

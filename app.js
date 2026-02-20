@@ -317,6 +317,7 @@ const App = {
         App._updatePeerSelects();
         App.displaySystemMessage(name + ' left');
         App._persistSession();
+        Tools.peerLeft(peerId);
     },
 
     // === PEER LIST UI ===
@@ -361,7 +362,8 @@ const App = {
         const selects = [
             'file-peer-select', 'speed-peer-select', 'media-peer-select',
             'dc-peer-select', 'conntype-peer-select', 'stats-peer-select',
-            'mtu-peer-select', 'restart-peer-select', 'encrypt-peer-select'
+            'mtu-peer-select', 'restart-peer-select', 'encrypt-peer-select',
+            'rc-peer-select'
         ];
 
         for (const selectId of selects) {
@@ -525,6 +527,9 @@ const App = {
             group.appendChild(msg);
             log.appendChild(group);
         } else {
+            const group = document.createElement('div');
+            group.className = 'message-group local';
+
             const div = document.createElement('div');
             div.className = 'message local image-message';
 
@@ -533,7 +538,8 @@ const App = {
             img.addEventListener('click', () => window.open(dataUrl, '_blank'));
 
             div.appendChild(img);
-            log.appendChild(div);
+            group.appendChild(div);
+            log.appendChild(group);
         }
 
         log.scrollTop = log.scrollHeight;

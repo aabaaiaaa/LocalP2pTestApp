@@ -7,6 +7,15 @@ const Tools = {
     _whiteboardPoints: [],
     _localGeo: null,
 
+    _rc: {
+        active: false,
+        targetPeerId: null,
+        beingControlled: false,
+        controllerPeerId: null,
+        lastMoveTime: 0,
+        _onMove: null, _onDown: null, _onUp: null, _onWheel: null, _onKey: null,
+    },
+
     init() {
         // Encryption
         document.getElementById('btn-encrypt-verify').addEventListener('click', () => Tools.verifyEncryption());
@@ -24,6 +33,10 @@ const Tools = {
         // Sensors
         document.getElementById('btn-sensor-start').addEventListener('click', () => Tools.startSensors());
         document.getElementById('btn-sensor-stop').addEventListener('click', () => Tools.stopSensors());
+
+        // Remote Control
+        document.getElementById('btn-rc-start').addEventListener('click', () => Tools.startRemoteControl());
+        document.getElementById('btn-rc-stop').addEventListener('click', () => Tools.stopRemoteControl());
     },
 
     registerHandlers(conn) {
@@ -31,6 +44,13 @@ const Tools = {
         conn.registerHandler('geo-share', (peerId, msg) => Tools._handleGeo(peerId, msg));
         conn.registerHandler('whiteboard-draw', (peerId, msg) => Tools._handleWhiteboard(peerId, msg));
         conn.registerHandler('sensor-data', (peerId, msg) => Tools._handleSensor(peerId, msg));
+        conn.registerHandler('remote-ctrl-start', (peerId) => Tools._handleRemoteCtrlStart(peerId));
+        conn.registerHandler('remote-ctrl-stop', () => Tools._handleRemoteCtrlStop());
+        conn.registerHandler('remote-ctrl-move', (peerId, msg) => Tools._handleRemoteCtrlMove(peerId, msg));
+        conn.registerHandler('remote-ctrl-down', (peerId, msg) => Tools._handleRemoteCtrlDown(peerId, msg));
+        conn.registerHandler('remote-ctrl-up', (peerId, msg) => Tools._handleRemoteCtrlUp(peerId, msg));
+        conn.registerHandler('remote-ctrl-scroll', (peerId, msg) => Tools._handleRemoteCtrlScroll(peerId, msg));
+        conn.registerHandler('remote-ctrl-key', (peerId, msg) => Tools._handleRemoteCtrlKey(peerId, msg));
     },
 
     _log(id, text) {
@@ -414,6 +434,198 @@ const Tools = {
     },
 
     _sensorCleanup: null,
+
+    // === REMOTE CONTROL ===
+
+    startRemoteControl() {
+        const peerId = document.getElementById('rc-peer-select').value;
+        if (!peerId) { alert('No peer selected'); return; }
+        if (!PeerManager.get(peerId)) { alert('Peer not connected'); return; }
+
+        Tools._rc.active = true;
+        Tools._rc.targetPeerId = peerId;
+
+        PeerManager.sendRaw(peerId, { type: 'remote-ctrl-start' });
+
+        const rc = Tools._rc;
+
+        rc._onMove = (e) => {
+            if (!e.isTrusted) return;
+            const now = Date.now();
+            if (now - rc.lastMoveTime < 16) return; // ~60 fps
+            rc.lastMoveTime = now;
+            const nx = e.clientX / window.innerWidth;
+            const ny = e.clientY / window.innerHeight;
+            PeerManager.sendRaw(peerId, { type: 'remote-ctrl-move', nx, ny });
+        };
+
+        rc._onDown = (e) => {
+            if (!e.isTrusted) return;
+            const nx = e.clientX / window.innerWidth;
+            const ny = e.clientY / window.innerHeight;
+            PeerManager.sendRaw(peerId, { type: 'remote-ctrl-down', nx, ny, button: e.button });
+        };
+
+        rc._onUp = (e) => {
+            if (!e.isTrusted) return;
+            const nx = e.clientX / window.innerWidth;
+            const ny = e.clientY / window.innerHeight;
+            PeerManager.sendRaw(peerId, { type: 'remote-ctrl-up', nx, ny, button: e.button });
+        };
+
+        rc._onWheel = (e) => {
+            if (!e.isTrusted) return;
+            const nx = e.clientX / window.innerWidth;
+            const ny = e.clientY / window.innerHeight;
+            PeerManager.sendRaw(peerId, { type: 'remote-ctrl-scroll', nx, ny, dx: e.deltaX, dy: e.deltaY });
+        };
+
+        rc._onKey = (e) => {
+            if (!e.isTrusted) return;
+            const tag = (document.activeElement || document.body).tagName;
+            if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+            PeerManager.sendRaw(peerId, {
+                type: 'remote-ctrl-key',
+                evType: e.type,
+                key: e.key,
+                code: e.code,
+                ctrlKey: e.ctrlKey,
+                shiftKey: e.shiftKey,
+                altKey: e.altKey,
+                metaKey: e.metaKey
+            });
+        };
+
+        document.addEventListener('mousemove', rc._onMove);
+        document.addEventListener('mousedown', rc._onDown);
+        document.addEventListener('mouseup', rc._onUp);
+        document.addEventListener('wheel', rc._onWheel, { passive: true });
+        document.addEventListener('keydown', rc._onKey);
+        document.addEventListener('keyup', rc._onKey);
+
+        document.getElementById('btn-rc-start').classList.add('hidden');
+        document.getElementById('btn-rc-stop').classList.remove('hidden');
+        const name = App._peerNames.get(peerId) || peerId;
+        document.getElementById('rc-status').textContent = 'Controlling ' + name + '…';
+    },
+
+    stopRemoteControl() {
+        const peerId = Tools._rc.targetPeerId;
+        if (peerId) PeerManager.sendRaw(peerId, { type: 'remote-ctrl-stop' });
+        Tools._stopControlling();
+    },
+
+    _stopControlling() {
+        const rc = Tools._rc;
+        if (rc._onMove)  document.removeEventListener('mousemove', rc._onMove);
+        if (rc._onDown)  document.removeEventListener('mousedown', rc._onDown);
+        if (rc._onUp)    document.removeEventListener('mouseup',   rc._onUp);
+        if (rc._onWheel) document.removeEventListener('wheel',     rc._onWheel);
+        if (rc._onKey) {
+            document.removeEventListener('keydown', rc._onKey);
+            document.removeEventListener('keyup',   rc._onKey);
+        }
+        rc.active = false;
+        rc.targetPeerId = null;
+        rc._onMove = rc._onDown = rc._onUp = rc._onWheel = rc._onKey = null;
+
+        document.getElementById('btn-rc-start').classList.remove('hidden');
+        document.getElementById('btn-rc-stop').classList.add('hidden');
+        document.getElementById('rc-status').textContent = '';
+    },
+
+    peerLeft(peerId) {
+        if (Tools._rc.active && Tools._rc.targetPeerId === peerId) {
+            Tools._stopControlling();
+        }
+        if (Tools._rc.beingControlled && Tools._rc.controllerPeerId === peerId) {
+            Tools._handleRemoteCtrlStop();
+        }
+    },
+
+    _handleRemoteCtrlStart(peerId) {
+        Tools._rc.beingControlled = true;
+        Tools._rc.controllerPeerId = peerId;
+        const name = App._peerNames.get(peerId) || peerId;
+        const banner = document.getElementById('rc-controlled-banner');
+        banner.textContent = name + ' is controlling this device';
+        banner.classList.remove('hidden');
+        document.getElementById('rc-ghost-cursor').classList.remove('hidden');
+    },
+
+    _handleRemoteCtrlStop() {
+        Tools._rc.beingControlled = false;
+        Tools._rc.controllerPeerId = null;
+        document.getElementById('rc-controlled-banner').classList.add('hidden');
+        document.getElementById('rc-ghost-cursor').classList.add('hidden');
+    },
+
+    _handleRemoteCtrlMove(peerId, msg) {
+        const px = msg.nx * window.innerWidth;
+        const py = msg.ny * window.innerHeight;
+
+        const cursor = document.getElementById('rc-ghost-cursor');
+        cursor.style.left = px + 'px';
+        cursor.style.top  = py + 'px';
+
+        const target = document.elementFromPoint(px, py) || document.body;
+        target.dispatchEvent(new MouseEvent('mousemove', {
+            bubbles: true, cancelable: true,
+            clientX: px, clientY: py
+        }));
+    },
+
+    _handleRemoteCtrlDown(peerId, msg) {
+        const px = msg.nx * window.innerWidth;
+        const py = msg.ny * window.innerHeight;
+        const target = document.elementFromPoint(px, py) || document.body;
+        target.dispatchEvent(new MouseEvent('mousedown', {
+            bubbles: true, cancelable: true,
+            clientX: px, clientY: py, button: msg.button, buttons: 1
+        }));
+    },
+
+    _handleRemoteCtrlUp(peerId, msg) {
+        const px = msg.nx * window.innerWidth;
+        const py = msg.ny * window.innerHeight;
+        const target = document.elementFromPoint(px, py) || document.body;
+        target.dispatchEvent(new MouseEvent('mouseup', {
+            bubbles: true, cancelable: true,
+            clientX: px, clientY: py, button: msg.button
+        }));
+        target.dispatchEvent(new MouseEvent('click', {
+            bubbles: true, cancelable: true,
+            clientX: px, clientY: py, button: msg.button
+        }));
+    },
+
+    _handleRemoteCtrlScroll(peerId, msg) {
+        const px = msg.nx * window.innerWidth;
+        const py = msg.ny * window.innerHeight;
+        let el = document.elementFromPoint(px, py) || document.body;
+
+        // Walk up to find nearest scrollable ancestor
+        while (el && el !== document.body) {
+            const style = window.getComputedStyle(el);
+            const overflow = style.overflowY;
+            if ((overflow === 'auto' || overflow === 'scroll') && el.scrollHeight > el.clientHeight) {
+                el.scrollBy(msg.dx, msg.dy);
+                return;
+            }
+            el = el.parentElement;
+        }
+        window.scrollBy(msg.dx, msg.dy);
+    },
+
+    _handleRemoteCtrlKey(peerId, msg) {
+        const target = document.activeElement || document.body;
+        target.dispatchEvent(new KeyboardEvent(msg.evType, {
+            bubbles: true, cancelable: true,
+            key: msg.key, code: msg.code,
+            ctrlKey: msg.ctrlKey, shiftKey: msg.shiftKey,
+            altKey: msg.altKey, metaKey: msg.metaKey
+        }));
+    },
 
     _handleSensor(peerId, msg) {
         const name = App._peerNames.get(peerId) || peerId;

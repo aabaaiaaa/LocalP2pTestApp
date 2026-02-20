@@ -915,9 +915,14 @@ h2 { font-size: 1.25rem; font-weight: 600; }
    align-self: flex-end makes the box auto-width, which creates a circular
    dependency between the box width and the image's natural size — the browser
    resolves it using the image's intrinsic width (1280px), then overflow: hidden
-   clips the image to the 80% visual bound, making it appear cut off. */
+   clips the image to the 80% visual bound, making it appear cut off.
+   When wrapped in a .message-group (the normal case), the group's max-width: 80%
+   provides the constraint instead, so width: auto lets the message shrink to fit. */
 .message.local.image-message {
     width: 80%;
+}
+.message-group .message.local.image-message {
+    width: auto;
 }
 
 /* Reconnect prompt on home screen */
@@ -1158,3 +1163,23 @@ h2 { font-size: 1.25rem; font-weight: 600; }
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--surface-alt); border-radius: 2px; }
+
+/* Remote Control */
+#rc-controlled-banner {
+    position: fixed; top: 0; left: 0; right: 0;
+    padding: 6px 16px;
+    background: var(--warning); color: #000;
+    text-align: center; font-size: 0.8125rem; font-weight: 600;
+    z-index: 99998;
+}
+
+#rc-ghost-cursor {
+    position: fixed; top: 0; left: 0;
+    width: 14px; height: 14px; border-radius: 50%;
+    background: rgba(37, 99, 235, 0.75);
+    border: 2px solid #fff;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+    z-index: 99999;
+}
