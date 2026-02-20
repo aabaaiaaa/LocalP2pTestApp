@@ -70,15 +70,15 @@ class PeerConnection {
 
         pc.oniceconnectionstatechange = () => {
             const state = pc.iceConnectionState;
-            // Don't fire 'connected'/'completed' here — dc.onopen handles the
-            // real "connected" event.  ICE can report 'connected' before the
-            // remote side has the answer (especially on LAN), which would
-            // prematurely switch the UI away from the answer-QR screen.
-            if (state !== 'connected' && state !== 'completed') {
-                this.callbacks.onStateChange(this.peerId, state);
-            }
+            // ICE 'connected'/'completed' — dc.onopen is the authoritative signal.
+            // ICE 'disconnected' — transient; browsers fire this during candidate
+            //   pair checking and it often self-recovers.  dc.onclose is the
+            //   authoritative 'disconnected' signal so we ignore ICE 'disconnected'
+            //   to avoid falsely triggering the reconnect grace period.
+            // ICE 'failed' — terminal; surface as an error so the app can react.
             if (state === 'failed') {
-                this.callbacks.onError(this.peerId, new Error('Connection failed'));
+                this.callbacks.onStateChange(this.peerId, 'disconnected');
+                this.callbacks.onError(this.peerId, new Error('ICE connection failed'));
             }
         };
 
