@@ -113,7 +113,18 @@ const App = {
         PeerManager.onFileChunk = (peerId, chunk, received, total) => App.updateFileProgress(received, total);
         PeerManager.onFileComplete = (peerId, blob, name) => App.showFileDownload(blob, name);
         PeerManager.onStateChange = (peerId, state) => App.handleConnectionState(peerId, state);
-        PeerManager.onError = (peerId, err) => console.error('Peer', peerId, 'error:', err.message || err);
+        PeerManager.onError = (peerId, err) => {
+            console.error('Peer', peerId, 'error:', err.message || err);
+            // Surface ICE failures during initial connection as a user-visible error.
+            // Post-connection errors (e.g. after dc.onopen) are handled elsewhere.
+            const state = document.body.dataset.state;
+            if (state === 'connecting' || state === 'show-answer-qr') {
+                App.showError(
+                    (err.message || 'Connection failed') +
+                    '. If devices are on different networks, enable remote connections in Network Settings.'
+                );
+            }
+        };
         PeerManager.onPong = (peerId, msg) => SpeedTest.handlePong(peerId, msg);
         PeerManager.onRemoteStream = (peerId, stream) => App.handleRemoteStream(peerId, stream);
         PeerManager.onMediaStats = (peerId, stats) => App.updateMediaStats(stats);
@@ -232,8 +243,13 @@ const App = {
                         App._deregisterBeforeUnload();
                     }
                 } else if (!App._gracePeriods.has(peerId)) {
-                    // Accidental disconnect — start grace period
-                    App._startGracePeriod(peerId);
+                    // Accidental disconnect — only start grace period if this peer
+                    // was fully established (in _connections, not a temp pending ID).
+                    if (PeerManager._connections.has(peerId)) {
+                        App._startGracePeriod(peerId);
+                    }
+                    // Pending/temp connections that drop before introduce are handled
+                    // via onError (ICE timeout or failure), not grace periods.
                 }
                 break;
             }

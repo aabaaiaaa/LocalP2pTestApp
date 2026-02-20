@@ -21,6 +21,8 @@ class PeerConnection {
         this._lastPeerHeartbeat = 0;
         this._heartbeatState = 'connected';
         this._renegotiating = false;
+        this._everConnected = false;
+        this._iceDisconnectTimer = null;
 
         // Traffic counters
         this._messagesSent = 0;
@@ -70,15 +72,35 @@ class PeerConnection {
 
         pc.oniceconnectionstatechange = () => {
             const state = pc.iceConnectionState;
-            // ICE 'connected'/'completed' — dc.onopen is the authoritative signal.
-            // ICE 'disconnected' — transient; browsers fire this during candidate
-            //   pair checking and it often self-recovers.  dc.onclose is the
-            //   authoritative 'disconnected' signal so we ignore ICE 'disconnected'
-            //   to avoid falsely triggering the reconnect grace period.
-            // ICE 'failed' — terminal; surface as an error so the app can react.
-            if (state === 'failed') {
-                this.callbacks.onStateChange(this.peerId, 'disconnected');
-                this.callbacks.onError(this.peerId, new Error('ICE connection failed'));
+
+            if (state === 'connected' || state === 'completed') {
+                // ICE succeeded — dc.onopen is the authoritative 'connected' signal.
+                // Clear any pending disconnect timer so it doesn't fire spuriously.
+                if (this._iceDisconnectTimer) {
+                    clearTimeout(this._iceDisconnectTimer);
+                    this._iceDisconnectTimer = null;
+                }
+            } else if (state === 'disconnected' && !this._everConnected) {
+                // ICE 'disconnected' before the data channel ever opened.
+                // This can be transient — give it 10 s to recover before surfacing
+                // a failure.  Post-connection drops are handled by dc.onclose.
+                if (!this._iceDisconnectTimer) {
+                    this._iceDisconnectTimer = setTimeout(() => {
+                        this._iceDisconnectTimer = null;
+                        if (!this._everConnected && this._pc) {
+                            this.callbacks.onError(this.peerId, new Error('ICE connection timed out'));
+                        }
+                    }, 10000);
+                }
+            } else if (state === 'failed') {
+                // Terminal failure — surface immediately.
+                if (this._iceDisconnectTimer) {
+                    clearTimeout(this._iceDisconnectTimer);
+                    this._iceDisconnectTimer = null;
+                }
+                if (!this._everConnected) {
+                    this.callbacks.onError(this.peerId, new Error('ICE connection failed'));
+                }
             }
         };
 
@@ -166,6 +188,12 @@ class PeerConnection {
         dc.binaryType = 'arraybuffer';
 
         dc.onopen = () => {
+            this._everConnected = true;
+            // Data channel opened — clear any pending ICE disconnect timer.
+            if (this._iceDisconnectTimer) {
+                clearTimeout(this._iceDisconnectTimer);
+                this._iceDisconnectTimer = null;
+            }
             this.callbacks.onStateChange(this.peerId, 'connected');
             this._setupRenegotiation();
             this._startHeartbeat();
@@ -595,6 +623,10 @@ class PeerConnection {
 
     close() {
         this._stopHeartbeat();
+        if (this._iceDisconnectTimer) {
+            clearTimeout(this._iceDisconnectTimer);
+            this._iceDisconnectTimer = null;
+        }
         this.stopMedia();
         if (this._dc) { this._dc.close(); this._dc = null; }
         if (this._pc) { this._pc.close(); this._pc = null; }
