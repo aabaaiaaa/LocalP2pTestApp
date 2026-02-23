@@ -249,13 +249,13 @@ class PeerConnection {
                     PeerManager._handleRelayAnswer(this.peerId, msg);
                     break;
                 case 'file-meta':
-                    this._incomingFile = { name: msg.name, size: msg.size, mimeType: msg.mimeType, chunks: [], received: 0 };
+                    this._incomingFile = { transferId: msg.transferId, name: msg.name, size: msg.size, mimeType: msg.mimeType, chunks: [], received: 0 };
                     this.callbacks.onFileMetadata(this.peerId, msg);
                     break;
                 case 'file-end':
                     if (this._incomingFile) {
                         const blob = new Blob(this._incomingFile.chunks, { type: this._incomingFile.mimeType });
-                        this.callbacks.onFileComplete(this.peerId, blob, this._incomingFile.name);
+                        this.callbacks.onFileComplete(this.peerId, blob, this._incomingFile.name, this._incomingFile.transferId);
                         this._incomingFile = null;
                     }
                     break;
@@ -315,7 +315,7 @@ class PeerConnection {
             } else if (this._incomingFile) {
                 this._incomingFile.chunks.push(event.data);
                 this._incomingFile.received += event.data.byteLength;
-                this.callbacks.onFileChunk(this.peerId, event.data, this._incomingFile.received, this._incomingFile.size);
+                this.callbacks.onFileChunk(this.peerId, event.data, this._incomingFile.received, this._incomingFile.size, this._incomingFile.transferId);
             }
         }
     }
@@ -344,19 +344,56 @@ class PeerConnection {
 
     // === FILE TRANSFER ===
 
-    async sendFile(file) {
+    async sendFile(file, onProgress) {
         if (!this._dc || this._dc.readyState !== 'open') throw new Error('Not connected');
 
-        if (!this._send(JSON.stringify({ type: 'file-meta', name: file.name, size: file.size, mimeType: file.type || 'application/octet-stream' }))) {
+        const transferId = Math.random().toString(36).slice(2, 10);
+
+        if (!this._send(JSON.stringify({ type: 'file-meta', transferId, name: file.name, size: file.size, mimeType: file.type || 'application/octet-stream' }))) {
             throw new Error('Failed to send file metadata — channel closed');
         }
 
-        const buffer = await file.arrayBuffer();
-        await this._sendBuffer(buffer);
+        await this._sendFileInChunks(file, onProgress);
 
-        if (!this._send(JSON.stringify({ type: 'file-end' }))) {
+        if (!this._send(JSON.stringify({ type: 'file-end', transferId }))) {
             throw new Error('Failed to send file-end marker — channel closed');
         }
+    }
+
+    // Streams file in 64 KB slices — avoids loading the whole file into RAM
+    _sendFileInChunks(file, onProgress) {
+        return new Promise((resolve, reject) => {
+            const dc = this._dc;
+            const CHUNK_SIZE = 64 * 1024;
+            let offset = 0;
+
+            const onClose = () => { cleanup(); reject(new Error('Data channel closed during transfer')); };
+            const cleanup = () => { dc.removeEventListener('close', onClose); dc.onbufferedamountlow = null; };
+            dc.addEventListener('close', onClose);
+
+            const sendNext = () => {
+                if (offset >= file.size) { cleanup(); resolve(); return; }
+                if (dc.readyState !== 'open') { cleanup(); reject(new Error('Data channel closed during transfer')); return; }
+
+                if (dc.bufferedAmount > 65536) {
+                    dc.onbufferedamountlow = () => { dc.onbufferedamountlow = null; sendNext(); };
+                    dc.bufferedAmountLowThreshold = 16384;
+                    return;
+                }
+
+                const end = Math.min(offset + CHUNK_SIZE, file.size);
+                file.slice(offset, end).arrayBuffer().then(buffer => {
+                    if (dc.readyState !== 'open') { cleanup(); reject(new Error('Data channel closed during transfer')); return; }
+                    dc.send(buffer);
+                    this._bytesSent += buffer.byteLength;
+                    offset = end;
+                    if (onProgress) onProgress(offset, file.size);
+                    sendNext();
+                }).catch(err => { cleanup(); reject(err); });
+            };
+
+            sendNext();
+        });
     }
 
     // === SPEED TEST ===
@@ -712,8 +749,8 @@ const PeerManager = {
         return {
             onMessage: (peerId, text) => { if (PeerManager.onMessage) PeerManager.onMessage(peerId, text); },
             onFileMetadata: (peerId, meta) => { if (PeerManager.onFileMetadata) PeerManager.onFileMetadata(peerId, meta); },
-            onFileChunk: (peerId, chunk, received, total) => { if (PeerManager.onFileChunk) PeerManager.onFileChunk(peerId, chunk, received, total); },
-            onFileComplete: (peerId, blob, name) => { if (PeerManager.onFileComplete) PeerManager.onFileComplete(peerId, blob, name); },
+            onFileChunk: (peerId, chunk, received, total, transferId) => { if (PeerManager.onFileChunk) PeerManager.onFileChunk(peerId, chunk, received, total, transferId); },
+            onFileComplete: (peerId, blob, name, transferId) => { if (PeerManager.onFileComplete) PeerManager.onFileComplete(peerId, blob, name, transferId); },
             onStateChange: (peerId, state) => { if (PeerManager.onStateChange) PeerManager.onStateChange(peerId, state); },
             onError: (peerId, err) => { if (PeerManager.onError) PeerManager.onError(peerId, err); },
             onPong: (peerId, msg) => { if (PeerManager.onPong) PeerManager.onPong(peerId, msg); },
@@ -940,10 +977,10 @@ const PeerManager = {
         return peers;
     },
 
-    sendFile(peerId, file) {
+    sendFile(peerId, file, onProgress) {
         const conn = PeerManager._connections.get(peerId);
         if (!conn) throw new Error('Peer not found: ' + peerId);
-        return conn.sendFile(file);
+        return conn.sendFile(file, onProgress);
     },
 
     sendSpeedTest(peerId, size) {

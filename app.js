@@ -3,6 +3,7 @@
 const App = {
     role: null,
     _blobUrls: [],
+    _transferCards: new Map(),  // transferId -> { card, fill, statusEl }
     _localIps: null,    // cached local IPs gathered via ICE
     _typingPeers: new Map(),    // peerId -> typing state
     _typingTimeout: null,       // local typing debounce
@@ -130,8 +131,8 @@ const App = {
         // Wire PeerManager callbacks
         PeerManager.onMessage = (peerId, text) => App.displayMessage(peerId, text, 'remote');
         PeerManager.onFileMetadata = (peerId, meta) => App.showFileIncoming(peerId, meta);
-        PeerManager.onFileChunk = (peerId, chunk, received, total) => App.updateFileProgress(received, total);
-        PeerManager.onFileComplete = (peerId, blob, name) => App.showFileDownload(blob, name);
+        PeerManager.onFileChunk = (peerId, chunk, received, total, transferId) => App._updateTransferCard(transferId, received, total);
+        PeerManager.onFileComplete = (peerId, blob, name, transferId) => App.showFileDownload(blob, name, transferId);
         PeerManager.onStateChange = (peerId, state) => App.handleConnectionState(peerId, state);
         PeerManager.onError = (peerId, err) => {
             console.error('Peer', peerId, 'error:', err.message || err);
@@ -634,8 +635,8 @@ const App = {
     // === FILES ===
 
     async sendFile(event) {
-        const file = event.target.files[0];
-        if (!file) return;
+        const files = Array.from(event.target.files);
+        if (!files.length) return;
 
         const peerId = App._getSelectedPeer('file-peer-select');
         if (!peerId) {
@@ -643,22 +644,19 @@ const App = {
             return;
         }
 
-        const status = document.getElementById('file-status');
-        const progress = document.getElementById('file-progress');
-        const fill = document.getElementById('file-progress-fill');
+        const peerName = App._peerNames.get(peerId) || peerId;
 
-        progress.classList.remove('hidden');
-        status.textContent = 'Sending ' + file.name + ' (' + App.formatBytes(file.size) + ')...';
-        fill.style.width = '0%';
+        for (const file of files) {
+            const cardId = 'send-' + Math.random().toString(36).slice(2, 10);
+            const { statusEl } = App._createTransferCard(cardId, file.name, file.size, 'out');
+            statusEl.textContent = 'Sending to ' + peerName + '...';
 
-        try {
-            await PeerManager.sendFile(peerId, file);
-            status.textContent = 'Sent ' + file.name;
-            fill.style.width = '100%';
-        } catch (err) {
-            status.textContent = 'Failed: ' + err.message;
-            fill.style.width = '0%';
-            setTimeout(() => progress.classList.add('hidden'), 3000);
+            try {
+                await PeerManager.sendFile(peerId, file, (sent, total) => App._updateTransferCard(cardId, sent, total));
+                App._completeTransferCard(cardId, null, file.name);
+            } catch (err) {
+                App._errorTransferCard(cardId, err.message);
+            }
         }
 
         event.target.value = '';
@@ -666,32 +664,89 @@ const App = {
 
     showFileIncoming(peerId, meta) {
         const senderName = App._peerNames.get(peerId) || peerId;
-        const progress = document.getElementById('file-progress');
-        const status = document.getElementById('file-status');
-        const fill = document.getElementById('file-progress-fill');
-        progress.classList.remove('hidden');
-        status.textContent = 'Receiving ' + meta.name + ' from ' + senderName + ' (' + App.formatBytes(meta.size) + ')...';
-        fill.style.width = '0%';
+        const transferId = meta.transferId || ('recv-' + Math.random().toString(36).slice(2, 10));
+        meta.transferId = transferId; // ensure consistent id even if sender is old
+        const { statusEl } = App._createTransferCard(transferId, meta.name, meta.size, 'in');
+        statusEl.textContent = 'Receiving from ' + senderName + '...';
     },
 
-    updateFileProgress(received, total) {
-        const pct = Math.round((received / total) * 100);
-        document.getElementById('file-progress-fill').style.width = pct + '%';
+    showFileDownload(blob, name, transferId) {
+        App._completeTransferCard(transferId, blob, name);
     },
 
-    showFileDownload(blob, name) {
-        document.getElementById('file-status').textContent = 'Received ' + name;
-        document.getElementById('file-progress-fill').style.width = '100%';
+    _createTransferCard(transferId, filename, size, direction) {
+        const container = document.getElementById('file-transfers');
 
-        const container = document.getElementById('received-files');
-        const link = document.createElement('a');
-        const blobUrl = URL.createObjectURL(blob);
-        App._blobUrls.push(blobUrl);
-        link.href = blobUrl;
-        link.download = name;
-        link.className = 'file-download';
-        link.textContent = name + ' (' + App.formatBytes(blob.size) + ')';
-        container.appendChild(link);
+        const card = document.createElement('div');
+        card.className = 'file-transfer-card';
+
+        const header = document.createElement('div');
+        header.className = 'file-transfer-header';
+
+        const arrow = document.createElement('span');
+        arrow.className = 'file-transfer-arrow';
+        arrow.textContent = direction === 'out' ? '↑' : '↓';
+
+        const nameEl = document.createElement('span');
+        nameEl.className = 'file-transfer-name';
+        nameEl.textContent = filename;
+        nameEl.title = filename;
+
+        const sizeEl = document.createElement('span');
+        sizeEl.className = 'file-transfer-size';
+        sizeEl.textContent = App.formatBytes(size);
+
+        header.append(arrow, nameEl, sizeEl);
+
+        const statusEl = document.createElement('p');
+        statusEl.className = 'file-transfer-status';
+
+        const bar = document.createElement('div');
+        bar.className = 'progress-bar';
+        const fill = document.createElement('div');
+        fill.className = 'progress-fill';
+        bar.appendChild(fill);
+
+        card.append(header, statusEl, bar);
+        container.prepend(card);
+
+        App._transferCards.set(transferId, { card, fill, statusEl });
+        return { card, fill, statusEl };
+    },
+
+    _updateTransferCard(transferId, received, total) {
+        const entry = App._transferCards.get(transferId);
+        if (!entry) return;
+        const pct = total > 0 ? Math.round((received / total) * 100) : 0;
+        entry.fill.style.width = pct + '%';
+        entry.statusEl.textContent = App.formatBytes(received) + ' / ' + App.formatBytes(total) + ' (' + pct + '%)';
+    },
+
+    _completeTransferCard(transferId, blob, filename) {
+        const entry = App._transferCards.get(transferId);
+        if (!entry) return;
+        entry.fill.style.width = '100%';
+        entry.card.classList.add('complete');
+        if (blob) {
+            const blobUrl = URL.createObjectURL(blob);
+            App._blobUrls.push(blobUrl);
+            const link = document.createElement('a');
+            link.href = blobUrl;
+            link.download = filename;
+            link.className = 'file-transfer-download';
+            link.textContent = 'Download ' + filename;
+            entry.card.appendChild(link);
+            entry.statusEl.textContent = App.formatBytes(blob.size) + ' received';
+        } else {
+            entry.statusEl.textContent = 'Sent';
+        }
+    },
+
+    _errorTransferCard(transferId, message) {
+        const entry = App._transferCards.get(transferId);
+        if (!entry) return;
+        entry.card.classList.add('error');
+        entry.statusEl.textContent = 'Error: ' + message;
     },
 
     // === MEDIA ===
@@ -1197,8 +1252,9 @@ const App = {
         App._stopNetworkStats();
         App._blobUrls.forEach(url => URL.revokeObjectURL(url));
         App._blobUrls = [];
+        App._transferCards.clear();
         document.getElementById('message-log').innerHTML = '';
-        document.getElementById('received-files').innerHTML = '';
+        document.getElementById('file-transfers').innerHTML = '';
         document.getElementById('speed-results').innerHTML = '';
         document.getElementById('peer-list').innerHTML = '';
         document.getElementById('remote-videos').innerHTML = '';
