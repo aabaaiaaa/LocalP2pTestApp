@@ -57,6 +57,8 @@ const App = {
         // Home
         document.getElementById('btn-create').addEventListener('click', () => App.startAsOfferer());
         document.getElementById('btn-join').addEventListener('click', () => App.startAsJoiner());
+        document.getElementById('btn-create-peerjs').addEventListener('click', () => PeerJSMode.startAsHost());
+        document.getElementById('btn-cancel-peerjs').addEventListener('click', () => App.cancelPeerJSHost());
 
         // QR flow
         document.getElementById('btn-scan-answer').addEventListener('click', () => App.scanAnswer());
@@ -166,12 +168,28 @@ const App = {
         if (session) {
             App._showReconnectPrompt(session);
         }
+
+        App._initUrlSignaling();
     },
 
     _initPeerManager() {
         const nameInput = document.getElementById('device-name');
         const name = nameInput ? nameInput.value.trim() : '';
         PeerManager.init(name);
+    },
+
+    // Called at end of init() — detect #peerjs=ID in URL hash for native-camera auto-join
+    _initUrlSignaling() {
+        const hash = window.location.hash;
+        if (hash.startsWith('#peerjs=')) {
+            PeerJSMode.joinWithId(hash.slice('#peerjs='.length));
+        }
+    },
+
+    cancelPeerJSHost() {
+        PeerJSMode.cleanup();
+        QR.stopDisplay();
+        App.setState('home');
     },
 
     setState(state) {
@@ -226,6 +244,13 @@ const App = {
 
         try {
             const data = await QR.scan('scanner-offer');
+
+            const peerjsId = PeerJSMode.parsePeerIdFromUrl(data);
+            if (peerjsId) {
+                PeerJSMode.joinWithId(peerjsId);
+                return;
+            }
+
             App.setState('creating-answer');
             const { encoded: offerEncoded, remoteIp: offererIp } = App._parseQrPayload(data);
             const { sdp } = Signal.decode(offerEncoded);
@@ -1235,6 +1260,7 @@ const App = {
 
         App.closeCamera();
         QR.stopDisplay();
+        PeerJSMode.cleanup();
         QR.stopScanner();
         StatsExplorer.stop();
         MediaExtended.stopScreenShare();

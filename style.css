@@ -36,6 +36,7 @@ body[data-state="show-answer-qr"] #view-show-answer-qr,
 body[data-state="scan-answer"] #view-scan-answer,
 body[data-state="connecting"] #view-connecting,
 body[data-state="connected"] #view-connected,
+body[data-state="show-peerjs-qr"] #view-show-peerjs-qr,
 body[data-state="error"] #view-error { display: flex; }
 
 /* Default view layout */

@@ -10,6 +10,12 @@ const QR = {
 
     CHUNK_MAX: 300,
 
+    generateSingle(containerId, data) {
+        const container = document.getElementById(containerId);
+        container.innerHTML = '';
+        QR._renderQR(container, data, 360);
+    },
+
     generate(containerId, data) {
         const container = document.getElementById(containerId);
         container.innerHTML = '';

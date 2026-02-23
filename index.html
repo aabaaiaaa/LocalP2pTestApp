@@ -54,6 +54,7 @@
         <div class="button-group">
             <button id="btn-create" class="btn primary">Create Connection</button>
             <button id="btn-join" class="btn secondary">Join Connection</button>
+            <button id="btn-create-peerjs" class="btn secondary">PeerJS Connect</button>
         </div>
         <div id="reconnect-prompt" class="reconnect-prompt hidden">
             <p>Previous session found</p>
@@ -660,6 +661,15 @@
         </div>
     </div>
 
+    <!-- SHOW PEERJS QR (PeerJS Mode — Device A waiting for connection) -->
+    <section id="view-show-peerjs-qr" class="view">
+        <h2>Share this code</h2>
+        <div id="qr-peerjs" class="qr-container"></div>
+        <p class="hint">Other device: scan with your camera app, or tap "Join Connection" and scan within the app</p>
+        <p class="hint">Signalling via PeerJS. Both devices need internet access.</p>
+        <button id="btn-cancel-peerjs" class="btn secondary small">Cancel</button>
+    </section>
+
     <!-- ERROR -->
     <section id="view-error" class="view">
         <h2>Something went wrong</h2>
@@ -674,6 +684,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js"></script>
     <!-- App modules -->
     <script src="version.js"></script>
     <script src="signal.js"></script>
@@ -686,6 +697,7 @@
     <script src="media-extended.js"></script>
     <script src="tools.js"></script>
     <script src="ice-config.js"></script>
+    <script src="peerjs-mode.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

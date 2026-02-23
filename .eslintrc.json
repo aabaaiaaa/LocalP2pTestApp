@@ -22,7 +22,10 @@
         "BUILD_INFO": "readonly",
         "pako": "readonly",
         "QRCode": "readonly",
-        "Html5Qrcode": "readonly"
+        "Html5Qrcode": "readonly",
+        "Peer": "readonly",
+        "PeerJSMode": "readonly",
+        "PeerJSDataChannelAdapter": "readonly"
     },
     "rules": {
         "no-undef": "warn",
