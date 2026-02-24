@@ -2,8 +2,7 @@
 
 const App = {
     role: null,
-    _blobUrls: [],
-    _transferCards: new Map(),  // transferId -> { card, fill, statusEl }
+    _transferCards: new Map(),  // transferId -> { card, fill, statusEl, name, mimeType, size, complete, chunks, opfsHandle, opfsWritable, writePromise, startTime, emaSpeed, lastSpeedBytes, lastSpeedTime, lastDisplayTime }
     _localIps: null,    // cached local IPs gathered via ICE
     _typingPeers: new Map(),    // peerId -> typing state
     _typingTimeout: null,       // local typing debounce
@@ -143,8 +142,8 @@ const App = {
         // Wire PeerManager callbacks
         PeerManager.onMessage = (peerId, text) => App.displayMessage(peerId, text, 'remote');
         PeerManager.onFileMetadata = (peerId, meta) => App.showFileIncoming(peerId, meta);
-        PeerManager.onFileChunk = (peerId, chunk, received, total, transferId) => App._updateTransferCard(transferId, received, total);
-        PeerManager.onFileComplete = (peerId, blob, name, transferId) => App.showFileDownload(blob, name, transferId);
+        PeerManager.onFileChunk = (peerId, chunk, received, total, transferId) => App._onFileChunk(transferId, chunk, received, total);
+        PeerManager.onFileComplete = (peerId, name, mimeType, transferId) => App._onFileReady(transferId, name, mimeType);
         PeerManager.onStateChange = (peerId, state) => App.handleConnectionState(peerId, state);
         PeerManager.onError = (peerId, err) => {
             console.error('Peer', peerId, 'error:', err.message || err);
@@ -679,7 +678,7 @@ const App = {
 
             try {
                 await PeerManager.sendFile(peerId, file, (sent, total) => App._updateTransferCard(cardId, sent, total));
-                App._completeTransferCard(cardId, null, file.name);
+                App._completeTransferCard(cardId);
             } catch (err) {
                 App._errorTransferCard(cardId, err.message);
             }
@@ -694,10 +693,44 @@ const App = {
         meta.transferId = transferId; // ensure consistent id even if sender is old
         const { statusEl } = App._createTransferCard(transferId, meta.name, meta.size, 'in');
         statusEl.textContent = 'Receiving from ' + senderName + '...';
+
+        // Augment entry with inbound transfer state (synchronous, before any chunks arrive)
+        const entry = App._transferCards.get(transferId);
+        entry.name = meta.name;
+        entry.mimeType = meta.mimeType || 'application/octet-stream';
+        entry.size = meta.size;
+        entry.complete = false;
+        entry.chunks = [];           // in-memory buffer until OPFS is ready (or as fallback)
+        entry.opfsHandle = null;
+        entry.opfsWritable = null;
+        entry.writePromise = Promise.resolve();
+        entry.startTime = Date.now();
+        entry.emaSpeed = 0;
+        entry.lastSpeedBytes = 0;
+        entry.lastSpeedTime = Date.now();
+        entry.lastDisplayTime = 0;
+
+        App._initOpfsWrite(transferId);
     },
 
-    showFileDownload(blob, name, transferId) {
-        App._completeTransferCard(transferId, blob, name);
+    async _initOpfsWrite(transferId) {
+        try {
+            const root = await navigator.storage.getDirectory();
+            const entry = App._transferCards.get(transferId);
+            if (!entry || entry.complete) return; // small file already done; keep in-memory path
+            const fileHandle = await root.getFileHandle('xfer-' + transferId, { create: true });
+            const writable = await fileHandle.createWritable();
+            // Synchronous block: drain buffer, activate OPFS path
+            entry.opfsHandle = fileHandle;
+            entry.opfsWritable = writable;
+            for (const chunk of entry.chunks) {
+                entry.writePromise = entry.writePromise.then(() => entry.opfsWritable.write(chunk));
+            }
+            entry.chunks = null; // signal OPFS is active
+        } catch (e) {
+            console.warn('OPFS unavailable, using in-memory buffer:', e.message);
+            // entry.chunks remains as the fallback buffer
+        }
     },
 
     _createTransferCard(transferId, filename, size, direction) {
@@ -740,6 +773,49 @@ const App = {
         return { card, fill, statusEl };
     },
 
+    // Called for inbound chunks — writes to OPFS (or buffers) and updates speed/ETA display
+    _onFileChunk(transferId, chunk, received, total) {
+        const entry = App._transferCards.get(transferId);
+        if (!entry) return;
+
+        // Write chunk to OPFS chain or buffer it
+        if (entry.opfsWritable) {
+            entry.writePromise = entry.writePromise.then(() => entry.opfsWritable.write(chunk));
+        } else if (entry.chunks !== null) {
+            entry.chunks.push(chunk);
+        }
+
+        // Progress bar (always updated)
+        const pct = total > 0 ? Math.round((received / total) * 100) : 0;
+        entry.fill.style.width = pct + '%';
+
+        // Speed / ETA — throttled to ~4 updates/s
+        const now = Date.now();
+        const dt = now - entry.lastSpeedTime;
+        if (dt >= 200) {
+            const db = received - entry.lastSpeedBytes;
+            const instant = db / dt; // bytes/ms
+            entry.emaSpeed = entry.emaSpeed > 0
+                ? entry.emaSpeed * 0.75 + instant * 0.25
+                : instant;
+            entry.lastSpeedBytes = received;
+            entry.lastSpeedTime = now;
+        }
+
+        if (now - entry.lastDisplayTime >= 250) {
+            entry.lastDisplayTime = now;
+            const speedBps = entry.emaSpeed * 1000;
+            let status = App.formatBytes(received) + ' / ' + App.formatBytes(total) + ' (' + pct + '%)';
+            if (speedBps > 0) {
+                status += ' · ' + App.formatBytes(speedBps) + '/s';
+                const etaSec = speedBps > 0 ? (total - received) / speedBps : 0;
+                if (etaSec > 1) status += ' · ' + App._formatDuration(etaSec) + ' left';
+            }
+            entry.statusEl.textContent = status;
+        }
+    },
+
+    // Called for outbound chunks — simple progress only
     _updateTransferCard(transferId, received, total) {
         const entry = App._transferCards.get(transferId);
         if (!entry) return;
@@ -748,24 +824,124 @@ const App = {
         entry.statusEl.textContent = App.formatBytes(received) + ' / ' + App.formatBytes(total) + ' (' + pct + '%)';
     },
 
-    _completeTransferCard(transferId, blob, filename) {
+    // Called when file-end received — closes OPFS stream then shows Save button
+    _onFileReady(transferId, name, mimeType) {
+        const entry = App._transferCards.get(transferId);
+        if (!entry) return;
+        entry.complete = true;
+        entry.name = name;
+        entry.mimeType = mimeType;
+
+        if (entry.opfsWritable) {
+            entry.writePromise = entry.writePromise
+                .then(() => entry.opfsWritable.close())
+                .then(() => {
+                    entry.opfsWritable = null;
+                    App._showSaveButton(transferId);
+                });
+        } else {
+            App._showSaveButton(transferId);
+        }
+        App._notifyFileReady();
+    },
+
+    _showSaveButton(transferId) {
+        const entry = App._transferCards.get(transferId);
+        if (!entry) return;
+        entry.fill.style.width = '100%';
+        entry.card.classList.add('complete', 'ready');
+        entry.statusEl.textContent = App.formatBytes(entry.size || 0) + ' received';
+
+        const btn = document.createElement('button');
+        btn.className = 'btn file-transfer-save';
+        btn.textContent = 'Save to disk';
+        btn.addEventListener('click', () => App._doSaveFile(transferId, btn));
+        entry.card.appendChild(btn);
+    },
+
+    async _doSaveFile(transferId, btn) {
+        const entry = App._transferCards.get(transferId);
+        if (!entry) return;
+        btn.disabled = true;
+        btn.textContent = 'Saving...';
+        try {
+            const handle = await window.showSaveFilePicker({ suggestedName: entry.name });
+            const saveWritable = await handle.createWritable();
+            if (entry.opfsHandle) {
+                await entry.writePromise; // ensure all OPFS writes + close are done
+                const file = await entry.opfsHandle.getFile();
+                await file.stream().pipeTo(saveWritable); // pipeTo closes saveWritable
+                try {
+                    const root = await navigator.storage.getDirectory();
+                    await root.removeEntry('xfer-' + transferId);
+                } catch (e) { /* non-critical cleanup */ }
+                entry.opfsHandle = null;
+            } else {
+                for (const chunk of entry.chunks) {
+                    await saveWritable.write(chunk);
+                }
+                await saveWritable.close();
+                entry.chunks = null;
+            }
+            entry.card.classList.remove('ready');
+            btn.remove();
+            const savedEl = document.createElement('p');
+            savedEl.className = 'file-transfer-saved';
+            savedEl.textContent = 'Saved';
+            entry.card.appendChild(savedEl);
+        } catch (e) {
+            btn.disabled = false;
+            btn.textContent = 'Save to disk';
+            if (e.name !== 'AbortError') console.error('Save failed:', e);
+        }
+    },
+
+    _notifyFileReady() {
+        const tab = document.querySelector('.tab[data-tab="files"]');
+        if (!tab || tab.classList.contains('active')) return;
+        tab.classList.add('unread');
+        try {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const t = ctx.currentTime;
+            // Two-tone beep distinct from the single message beep
+            const osc1 = ctx.createOscillator();
+            const gain1 = ctx.createGain();
+            osc1.connect(gain1);
+            gain1.connect(ctx.destination);
+            osc1.type = 'sine';
+            osc1.frequency.value = 660;
+            gain1.gain.setValueAtTime(0, t);
+            gain1.gain.linearRampToValueAtTime(0.25, t + 0.01);
+            gain1.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+            osc1.start(t);
+            osc1.stop(t + 0.2);
+            const osc2 = ctx.createOscillator();
+            const gain2 = ctx.createGain();
+            osc2.connect(gain2);
+            gain2.connect(ctx.destination);
+            osc2.type = 'sine';
+            osc2.frequency.value = 880;
+            gain2.gain.setValueAtTime(0, t + 0.24);
+            gain2.gain.linearRampToValueAtTime(0.25, t + 0.25);
+            gain2.gain.exponentialRampToValueAtTime(0.001, t + 0.45);
+            osc2.start(t + 0.24);
+            osc2.stop(t + 0.45);
+        } catch (e) { /* Web Audio unavailable */ }
+    },
+
+    _formatDuration(sec) {
+        sec = Math.round(sec);
+        if (sec < 60) return sec + 's';
+        if (sec < 3600) return Math.floor(sec / 60) + 'm ' + (sec % 60) + 's';
+        return Math.floor(sec / 3600) + 'h ' + Math.floor((sec % 3600) / 60) + 'm';
+    },
+
+    _completeTransferCard(transferId) {
         const entry = App._transferCards.get(transferId);
         if (!entry) return;
         entry.fill.style.width = '100%';
         entry.card.classList.add('complete');
-        if (blob) {
-            const blobUrl = URL.createObjectURL(blob);
-            App._blobUrls.push(blobUrl);
-            const link = document.createElement('a');
-            link.href = blobUrl;
-            link.download = filename;
-            link.className = 'file-transfer-download';
-            link.textContent = 'Download ' + filename;
-            entry.card.appendChild(link);
-            entry.statusEl.textContent = App.formatBytes(blob.size) + ' received';
-        } else {
-            entry.statusEl.textContent = 'Sent';
-        }
+        entry.statusEl.textContent = 'Sent';
     },
 
     _errorTransferCard(transferId, message) {
@@ -1283,6 +1459,10 @@ const App = {
             const tab = document.querySelector('.tab[data-tab="messages"]');
             if (tab) tab.classList.remove('unread');
         }
+        if (name === 'files') {
+            const tab = document.querySelector('.tab[data-tab="files"]');
+            if (tab) tab.classList.remove('unread');
+        }
 
         // Redraw mesh when switching to network tab
         if (name === 'network') {
@@ -1336,8 +1516,11 @@ const App = {
         App._peerNames.clear();
         App._clearLocalTyping();
         App._stopNetworkStats();
-        App._blobUrls.forEach(url => URL.revokeObjectURL(url));
-        App._blobUrls = [];
+        navigator.storage.getDirectory().then(root => {
+            for (const [transferId, entry] of App._transferCards) {
+                if (entry.opfsHandle) root.removeEntry('xfer-' + transferId).catch(() => {});
+            }
+        }).catch(() => {});
         App._transferCards.clear();
         document.getElementById('message-log').innerHTML = '';
         document.getElementById('file-transfers').innerHTML = '';

@@ -449,15 +449,32 @@ h2 { font-size: 1.25rem; font-weight: 600; }
     font-size: 0.75rem;
     color: var(--text-muted);
 }
-.file-transfer-download {
-    display: inline-block;
+.file-transfer-card.ready {
+    animation: pulse-file-ready 1s ease-in-out 5;
+}
+@keyframes pulse-file-ready {
+    0%, 100% { background: var(--surface); border-left-color: var(--primary); }
+    50% { background: rgba(37, 99, 235, 0.12); border-left-color: #60a5fa; }
+}
+.file-transfer-save {
+    align-self: flex-start;
+    padding: 4px 10px;
+    font-size: 0.8rem;
+    background: var(--primary);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    margin-top: 2px;
+}
+.file-transfer-save:hover { background: var(--primary-dark); }
+.file-transfer-save:disabled { opacity: 0.6; cursor: not-allowed; }
+.file-transfer-saved {
     font-size: 0.8rem;
     color: var(--primary);
     font-weight: 500;
-    text-decoration: none;
     margin-top: 2px;
 }
-.file-transfer-download:hover { text-decoration: underline; }
 .progress-bar {
     height: 6px;
     background: var(--surface-alt);

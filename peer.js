@@ -249,13 +249,12 @@ class PeerConnection {
                     PeerManager._handleRelayAnswer(this.peerId, msg);
                     break;
                 case 'file-meta':
-                    this._incomingFile = { transferId: msg.transferId, name: msg.name, size: msg.size, mimeType: msg.mimeType, chunks: [], received: 0 };
+                    this._incomingFile = { transferId: msg.transferId, name: msg.name, size: msg.size, mimeType: msg.mimeType, received: 0 };
                     this.callbacks.onFileMetadata(this.peerId, msg);
                     break;
                 case 'file-end':
                     if (this._incomingFile) {
-                        const blob = new Blob(this._incomingFile.chunks, { type: this._incomingFile.mimeType });
-                        this.callbacks.onFileComplete(this.peerId, blob, this._incomingFile.name, this._incomingFile.transferId);
+                        this.callbacks.onFileComplete(this.peerId, this._incomingFile.name, this._incomingFile.mimeType, this._incomingFile.transferId);
                         this._incomingFile = null;
                     }
                     break;
@@ -313,7 +312,6 @@ class PeerConnection {
                     this.callbacks.onSpeedData(this.peerId, this._speedTestReceived, this._speedTestExpected);
                 }
             } else if (this._incomingFile) {
-                this._incomingFile.chunks.push(event.data);
                 this._incomingFile.received += event.data.byteLength;
                 this.callbacks.onFileChunk(this.peerId, event.data, this._incomingFile.received, this._incomingFile.size, this._incomingFile.transferId);
             }
@@ -750,7 +748,7 @@ const PeerManager = {
             onMessage: (peerId, text) => { if (PeerManager.onMessage) PeerManager.onMessage(peerId, text); },
             onFileMetadata: (peerId, meta) => { if (PeerManager.onFileMetadata) PeerManager.onFileMetadata(peerId, meta); },
             onFileChunk: (peerId, chunk, received, total, transferId) => { if (PeerManager.onFileChunk) PeerManager.onFileChunk(peerId, chunk, received, total, transferId); },
-            onFileComplete: (peerId, blob, name, transferId) => { if (PeerManager.onFileComplete) PeerManager.onFileComplete(peerId, blob, name, transferId); },
+            onFileComplete: (peerId, name, mimeType, transferId) => { if (PeerManager.onFileComplete) PeerManager.onFileComplete(peerId, name, mimeType, transferId); },
             onStateChange: (peerId, state) => { if (PeerManager.onStateChange) PeerManager.onStateChange(peerId, state); },
             onError: (peerId, err) => { if (PeerManager.onError) PeerManager.onError(peerId, err); },
             onPong: (peerId, msg) => { if (PeerManager.onPong) PeerManager.onPong(peerId, msg); },
