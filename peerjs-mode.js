@@ -20,7 +20,7 @@ class PeerJSDataChannelAdapter {
 
     get readyState() { return this._conn.open ? 'open' : 'closed'; }
     get binaryType() { return 'arraybuffer'; }
-    set binaryType(_) { /* PeerJS sets this automatically with serialization:'none' */ }
+    set binaryType(_) { /* PeerJS sets this automatically with serialization:'raw' */ }
 
     get bufferedAmount() {
         return this._conn.dataChannel ? this._conn.dataChannel.bufferedAmount : 0;
@@ -88,7 +88,7 @@ const PeerJSMode = {
         });
 
         peer.on('open', () => {
-            const conn = peer.connect(hostId, { serialization: 'none' });
+            const conn = peer.connect(hostId, { serialization: 'raw' });
             conn.on('error', (err) => {
                 App.showError('Could not reach peer: ' + (err.message || err.type));
             });
