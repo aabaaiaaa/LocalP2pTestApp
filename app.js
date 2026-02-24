@@ -273,6 +273,7 @@ const App = {
     handleConnectionState(peerId, state) {
         switch (state) {
             case 'connected':
+                PeerJSMode.clearConnectTimer();
                 App.setState('connected');
                 App._updatePeerChip(peerId, 'connected');
                 App._updatePeerSelects();

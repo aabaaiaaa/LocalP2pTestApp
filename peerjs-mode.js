@@ -48,6 +48,8 @@ class PeerJSDataChannelAdapter {
 
 const PeerJSMode = {
     _peer: null,
+    _connectTimeout: null,
+    _countdownInterval: null,
 
     // Device A: register with PeerJS, display peer ID as a URL QR code.
     // qrContainerId: element id for the QR code (default 'qr-peerjs')
@@ -75,19 +77,55 @@ const PeerJSMode = {
         });
     },
 
+    clearConnectTimer() {
+        if (PeerJSMode._connectTimeout) {
+            clearTimeout(PeerJSMode._connectTimeout);
+            PeerJSMode._connectTimeout = null;
+        }
+        if (PeerJSMode._countdownInterval) {
+            clearInterval(PeerJSMode._countdownInterval);
+            PeerJSMode._countdownInterval = null;
+        }
+        ['peerjs-connect-countdown', 'modal-peerjs-connect-countdown'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = '';
+        });
+    },
+
     // Device B: called when app opens with #peerjs=ID in URL, or from in-app scan.
     // Callers are responsible for setting App.role, App._initPeerManager(), App.setState().
     joinWithId(hostId) {
+        const TIMEOUT_MS = 10000;
+        const expiresAt = Date.now() + TIMEOUT_MS;
+        const countdownEls = ['peerjs-connect-countdown', 'modal-peerjs-connect-countdown']
+            .map(id => document.getElementById(id));
+
+        const updateCountdown = () => {
+            const remaining = Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000));
+            countdownEls.forEach(el => { if (el) el.textContent = 'Timing out in ' + remaining + 's'; });
+        };
+        updateCountdown();
+        PeerJSMode._countdownInterval = setInterval(updateCountdown, 1000);
+
+        PeerJSMode._connectTimeout = setTimeout(() => {
+            PeerJSMode.clearConnectTimer();
+            PeerJSMode.cleanup();
+            App.showError('PeerJS did not connect within 10 seconds. Check both devices have internet access and try again.');
+        }, TIMEOUT_MS);
+
         const peer = new Peer();
         PeerJSMode._peer = peer;
 
         peer.on('error', (err) => {
-            App.showError('PeerJS connection failed: ' + err.type);
+            PeerJSMode.clearConnectTimer();
+            App.showError('PeerJS connection failed: ' + err.type +
+                '. Ensure both devices have internet access.');
         });
 
         peer.on('open', () => {
             const conn = peer.connect(hostId, { serialization: 'raw' });
             conn.on('error', (err) => {
+                PeerJSMode.clearConnectTimer();
                 App.showError('Could not reach peer: ' + (err.message || err.type));
             });
             PeerJSMode._onConnection(conn);
@@ -111,6 +149,7 @@ const PeerJSMode = {
     },
 
     cleanup() {
+        PeerJSMode.clearConnectTimer();
         if (PeerJSMode._peer) {
             PeerJSMode._peer.destroy();
             PeerJSMode._peer = null;
