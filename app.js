@@ -18,6 +18,7 @@ const App = {
     _gracePeriods: new Map(),   // peerId -> { connId, countdownInterval, expiresAt, peerName }
     _beforeUnloadRegistered: false,
     _reconnectEncodedSdp: null,
+    _peerjsReturnStep: null,
 
     init() {
         // Build version
@@ -136,6 +137,7 @@ const App = {
 
         // Reconnect modal
         document.getElementById('modal-btn-reconnect-scan').addEventListener('click', () => App.modalReconnectScanAnswer());
+        document.getElementById('modal-btn-reconnect-peerjs').addEventListener('click', () => App.reconnectStartPeerJSHost());
         document.getElementById('modal-btn-reconnect-cancel').addEventListener('click', () => App.cancelGracePeriod());
 
         // Wire PeerManager callbacks
@@ -910,6 +912,7 @@ const App = {
         QR.stopScanner();
         PeerJSMode.cleanup();
         App._currentModalConnId = null;
+        App._peerjsReturnStep = null;
         // Reset header text
         modal.querySelector('.modal-header h2').textContent = 'Add Peer';
     },
@@ -982,6 +985,17 @@ const App = {
     },
 
     modalStartPeerJSHost() {
+        App._peerjsReturnStep = 'modal-home';
+        App._showModalStep('modal-peerjs-loading');
+        PeerJSMode.startAsHost(
+            'modal-qr-peerjs',
+            () => App._showModalStep('modal-peerjs-qr'),
+            () => App._showModalStep('modal-connecting')
+        );
+    },
+
+    reconnectStartPeerJSHost() {
+        App._peerjsReturnStep = 'modal-reconnect';
         App._showModalStep('modal-peerjs-loading');
         PeerJSMode.startAsHost(
             'modal-qr-peerjs',
@@ -992,7 +1006,12 @@ const App = {
 
     modalCancelPeerJS() {
         PeerJSMode.cleanup();
-        App._showModalStep('modal-home');
+        const returnStep = App._peerjsReturnStep || 'modal-home';
+        App._peerjsReturnStep = null;
+        App._showModalStep(returnStep);
+        if (returnStep === 'modal-reconnect' && App._reconnectEncodedSdp) {
+            QR.generate('modal-reconnect-qr', App._reconnectEncodedSdp);
+        }
     },
 
     // === NETWORK TAB — MESH VISUALIZATION + TRAFFIC STATS ===
@@ -1608,6 +1627,14 @@ const App = {
             App.setState('scan-offer');
             try {
                 const data = await QR.scan('scanner-offer');
+
+                const peerjsId = PeerJSMode.parsePeerIdFromUrl(data);
+                if (peerjsId) {
+                    App.setState('connecting');
+                    PeerJSMode.joinWithId(peerjsId);
+                    return;
+                }
+
                 App.setState('creating-answer');
                 const { encoded: offerEncoded, remoteIp: offererIp } = App._parseQrPayload(data);
                 const { sdp } = Signal.decode(offerEncoded);
