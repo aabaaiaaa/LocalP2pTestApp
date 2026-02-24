@@ -49,12 +49,12 @@ class PeerJSDataChannelAdapter {
 const PeerJSMode = {
     _peer: null,
 
-    // Device A: register with PeerJS, display peer ID as a URL QR code
-    startAsHost() {
-        App.role = 'offerer';
-        App._initPeerManager();
-        App.setState('creating-offer');
-
+    // Device A: register with PeerJS, display peer ID as a URL QR code.
+    // qrContainerId: element id for the QR code (default 'qr-peerjs')
+    // onQRReady: called once the QR is rendered
+    // onConnection: called when the incoming connection arrives (before _onConnection)
+    startAsHost(qrContainerId, onQRReady, onConnection) {
+        qrContainerId = qrContainerId || 'qr-peerjs';
         const peer = new Peer();
         PeerJSMode._peer = peer;
 
@@ -65,21 +65,19 @@ const PeerJSMode = {
 
         peer.on('open', (id) => {
             const url = location.origin + location.pathname + '#peerjs=' + id;
-            QR.generateSingle('qr-peerjs', url);
-            App.setState('show-peerjs-qr');
+            QR.generateSingle(qrContainerId, url);
+            if (onQRReady) onQRReady();
         });
 
         peer.on('connection', (conn) => {
+            if (onConnection) onConnection();
             PeerJSMode._onConnection(conn);
         });
     },
 
-    // Device B: called when app opens with #peerjs=ID in URL, or from in-app scan
+    // Device B: called when app opens with #peerjs=ID in URL, or from in-app scan.
+    // Callers are responsible for setting App.role, App._initPeerManager(), App.setState().
     joinWithId(hostId) {
-        App.role = 'joiner';
-        App._initPeerManager();
-        App.setState('connecting');
-
         const peer = new Peer();
         PeerJSMode._peer = peer;
 

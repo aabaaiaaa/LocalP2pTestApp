@@ -617,6 +617,7 @@
                 <div id="modal-home" class="modal-step">
                     <button id="modal-btn-create" class="btn primary">Create Connection</button>
                     <button id="modal-btn-join" class="btn secondary">Join Connection</button>
+                    <button id="modal-btn-peerjs" class="btn secondary">PeerJS Connect</button>
                 </div>
                 <div id="modal-creating" class="modal-step hidden">
                     <div class="spinner"></div>
@@ -648,6 +649,16 @@
                 <div id="modal-connecting" class="modal-step hidden">
                     <div class="spinner"></div>
                     <p>Connecting...</p>
+                </div>
+                <div id="modal-peerjs-loading" class="modal-step hidden">
+                    <div class="spinner"></div>
+                    <p>Connecting to signalling server...</p>
+                    <button id="modal-btn-cancel-peerjs" class="btn secondary small">Cancel</button>
+                </div>
+                <div id="modal-peerjs-qr" class="modal-step hidden">
+                    <div id="modal-qr-peerjs" class="qr-container"></div>
+                    <p class="hint">Other device: scan to connect. Both devices need internet access.</p>
+                    <button id="modal-btn-cancel-peerjs-qr" class="btn secondary small">Cancel</button>
                 </div>
                 <div id="modal-reconnect" class="modal-step hidden">
                     <p id="modal-reconnect-peer-name"></p>

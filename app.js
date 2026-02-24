@@ -57,7 +57,12 @@ const App = {
         // Home
         document.getElementById('btn-create').addEventListener('click', () => App.startAsOfferer());
         document.getElementById('btn-join').addEventListener('click', () => App.startAsJoiner());
-        document.getElementById('btn-create-peerjs').addEventListener('click', () => PeerJSMode.startAsHost());
+        document.getElementById('btn-create-peerjs').addEventListener('click', () => {
+            App.role = 'offerer';
+            App._initPeerManager();
+            App.setState('creating-offer');
+            PeerJSMode.startAsHost('qr-peerjs', () => App.setState('show-peerjs-qr'), null);
+        });
         document.getElementById('btn-cancel-peerjs').addEventListener('click', () => App.cancelPeerJSHost());
 
         // QR flow
@@ -125,6 +130,9 @@ const App = {
         document.getElementById('modal-btn-scan-answer').addEventListener('click', () => App.modalScanAnswer());
         document.getElementById('modal-btn-cancel-scan').addEventListener('click', () => App.modalCancelScan());
         document.getElementById('modal-btn-cancel-scan-answer').addEventListener('click', () => App.modalCancelScanAnswer());
+        document.getElementById('modal-btn-peerjs').addEventListener('click', () => App.modalStartPeerJSHost());
+        document.getElementById('modal-btn-cancel-peerjs').addEventListener('click', () => App.modalCancelPeerJS());
+        document.getElementById('modal-btn-cancel-peerjs-qr').addEventListener('click', () => App.modalCancelPeerJS());
 
         // Reconnect modal
         document.getElementById('modal-btn-reconnect-scan').addEventListener('click', () => App.modalReconnectScanAnswer());
@@ -182,6 +190,9 @@ const App = {
     _initUrlSignaling() {
         const hash = window.location.hash;
         if (hash.startsWith('#peerjs=')) {
+            App.role = 'joiner';
+            App._initPeerManager();
+            App.setState('connecting');
             PeerJSMode.joinWithId(hash.slice('#peerjs='.length));
         }
     },
@@ -204,17 +215,12 @@ const App = {
         App.setState('creating-offer');
 
         try {
-            const [{ connId, desc }, localIps] = await Promise.all([
-                PeerManager.createOffer(),
-                App._getLocalIPs()
-            ]);
+            const { connId, encoded, localIp } = await App._coreCreateOffer();
             App._currentConnId = connId;
-            const signalStr = Signal.encode(desc);
-            const encoded = App._addLocalIpToPayload(signalStr, localIps[0] || null);
             console.log('Offer encoded:', encoded.length, 'chars');
             QR.generate('qr-offer', encoded);
             const ipEl = document.getElementById('local-ip-display');
-            if (ipEl) ipEl.textContent = localIps.length ? 'Your IP: ' + localIps[0] : '';
+            if (ipEl) ipEl.textContent = localIp ? 'Your IP: ' + localIp : '';
             App.setState('show-offer-qr');
         } catch (err) {
             App.showError('Failed to create offer: ' + err.message);
@@ -227,9 +233,7 @@ const App = {
         try {
             const data = await QR.scan('scanner-answer');
             App.setState('connecting');
-            const { encoded } = App._parseQrPayload(data);
-            const { sdp } = Signal.decode(encoded);
-            await PeerManager.processAnswer(App._currentConnId, sdp);
+            await App._coreApplyAnswer(App._currentConnId, data);
         } catch (err) {
             App.showError('Failed to scan answer: ' + err.message);
         }
@@ -247,23 +251,17 @@ const App = {
 
             const peerjsId = PeerJSMode.parsePeerIdFromUrl(data);
             if (peerjsId) {
+                App.setState('connecting');
                 PeerJSMode.joinWithId(peerjsId);
                 return;
             }
 
             App.setState('creating-answer');
-            const { encoded: offerEncoded, remoteIp: offererIp } = App._parseQrPayload(data);
-            const { sdp } = Signal.decode(offerEncoded);
-            const [{ connId, desc }, localIps] = await Promise.all([
-                PeerManager.processOfferAndCreateAnswer(sdp),
-                App._getLocalIPs()
-            ]);
+            const { connId, encoded, localIp, offererIp } = await App._coreCreateAnswer(data);
             App._currentConnId = connId;
-            const signalStr = Signal.encode(desc);
-            const encoded = App._addLocalIpToPayload(signalStr, localIps[0] || null);
             console.log('Answer encoded:', encoded.length, 'chars');
             QR.generate('qr-answer', encoded);
-            App._showSubnetWarning('subnet-warning', localIps[0] || null, offererIp);
+            App._showSubnetWarning('subnet-warning', localIp, offererIp);
             App.setState('show-answer-qr');
         } catch (err) {
             App.showError('Failed to process offer: ' + err.message);
@@ -863,6 +861,39 @@ const App = {
         set('stat-rtt', stats.rtt);
     },
 
+    // === SHARED CONNECTION CORE ===
+
+    // Create an offer; returns { connId, encoded, localIp }.
+    async _coreCreateOffer() {
+        const [{ connId, desc }, localIps] = await Promise.all([
+            PeerManager.createOffer(),
+            App._getLocalIPs()
+        ]);
+        const signalStr = Signal.encode(desc);
+        const encoded = App._addLocalIpToPayload(signalStr, localIps[0] || null);
+        return { connId, encoded, localIp: localIps[0] || null };
+    },
+
+    // Process an offer QR payload and create an answer; returns { connId, encoded, localIp, offererIp }.
+    async _coreCreateAnswer(offerQrData) {
+        const { encoded: offerEncoded, remoteIp: offererIp } = App._parseQrPayload(offerQrData);
+        const { sdp } = Signal.decode(offerEncoded);
+        const [{ connId, desc }, localIps] = await Promise.all([
+            PeerManager.processOfferAndCreateAnswer(sdp),
+            App._getLocalIPs()
+        ]);
+        const signalStr = Signal.encode(desc);
+        const encoded = App._addLocalIpToPayload(signalStr, localIps[0] || null);
+        return { connId, encoded, localIp: localIps[0] || null, offererIp };
+    },
+
+    // Process an answer QR payload for the given connId.
+    async _coreApplyAnswer(connId, answerQrData) {
+        const { encoded } = App._parseQrPayload(answerQrData);
+        const { sdp } = Signal.decode(encoded);
+        await PeerManager.processAnswer(connId, sdp);
+    },
+
     // === ADD PEER MODAL ===
 
     openAddPeerModal() {
@@ -876,6 +907,7 @@ const App = {
         modal.classList.add('hidden');
         QR.stopDisplay();
         QR.stopScanner();
+        PeerJSMode.cleanup();
         App._currentModalConnId = null;
         // Reset header text
         modal.querySelector('.modal-header h2').textContent = 'Add Peer';
@@ -889,16 +921,11 @@ const App = {
     async modalCreateOffer() {
         App._showModalStep('modal-creating');
         try {
-            const [{ connId, desc }, localIps] = await Promise.all([
-                PeerManager.createOffer(),
-                App._getLocalIPs()
-            ]);
+            const { connId, encoded, localIp } = await App._coreCreateOffer();
             App._currentModalConnId = connId;
-            const signalStr = Signal.encode(desc);
-            const encoded = App._addLocalIpToPayload(signalStr, localIps[0] || null);
             QR.generate('modal-qr-offer', encoded);
             const ipEl = document.getElementById('modal-local-ip-display');
-            if (ipEl) ipEl.textContent = localIps.length ? 'Your IP: ' + localIps[0] : '';
+            if (ipEl) ipEl.textContent = localIp ? 'Your IP: ' + localIp : '';
             App._showModalStep('modal-show-offer');
         } catch (err) {
             console.error('Modal offer failed:', err);
@@ -910,18 +937,19 @@ const App = {
         App._showModalStep('modal-scan-offer');
         try {
             const data = await QR.scan('modal-scanner-offer');
+
+            const peerjsId = PeerJSMode.parsePeerIdFromUrl(data);
+            if (peerjsId) {
+                App._showModalStep('modal-connecting');
+                PeerJSMode.joinWithId(peerjsId);
+                return;
+            }
+
             App._showModalStep('modal-creating-answer');
-            const { encoded: offerEncoded, remoteIp: offererIp } = App._parseQrPayload(data);
-            const { sdp } = Signal.decode(offerEncoded);
-            const [{ connId, desc }, localIps] = await Promise.all([
-                PeerManager.processOfferAndCreateAnswer(sdp),
-                App._getLocalIPs()
-            ]);
+            const { connId, encoded, localIp, offererIp } = await App._coreCreateAnswer(data);
             App._currentModalConnId = connId;
-            const signalStr = Signal.encode(desc);
-            const encoded = App._addLocalIpToPayload(signalStr, localIps[0] || null);
             QR.generate('modal-qr-answer', encoded);
-            App._showSubnetWarning('modal-subnet-warning', localIps[0] || null, offererIp);
+            App._showSubnetWarning('modal-subnet-warning', localIp, offererIp);
             App._showModalStep('modal-show-answer');
         } catch (err) {
             console.error('Modal scan offer failed:', err);
@@ -935,9 +963,7 @@ const App = {
         try {
             const data = await QR.scan('modal-scanner-answer');
             App._showModalStep('modal-connecting');
-            const { encoded } = App._parseQrPayload(data);
-            const { sdp } = Signal.decode(encoded);
-            await PeerManager.processAnswer(App._currentModalConnId, sdp);
+            await App._coreApplyAnswer(App._currentModalConnId, data);
         } catch (err) {
             console.error('Modal scan answer failed:', err);
             App._showModalStep('modal-home');
@@ -952,6 +978,20 @@ const App = {
     modalCancelScanAnswer() {
         QR.stopScanner();
         App._showModalStep('modal-show-offer');
+    },
+
+    modalStartPeerJSHost() {
+        App._showModalStep('modal-peerjs-loading');
+        PeerJSMode.startAsHost(
+            'modal-qr-peerjs',
+            () => App._showModalStep('modal-peerjs-qr'),
+            () => App._showModalStep('modal-connecting')
+        );
+    },
+
+    modalCancelPeerJS() {
+        PeerJSMode.cleanup();
+        App._showModalStep('modal-home');
     },
 
     // === NETWORK TAB — MESH VISUALIZATION + TRAFFIC STATS ===
