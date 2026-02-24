@@ -280,9 +280,13 @@ const App = {
                 App._updatePeerSelects();
                 App._startNetworkStats();
                 App._registerBeforeUnload();
-                // Close add-peer modal if open and this connection succeeded
+                // Close add-peer modal if open and this connection succeeded.
+                // Pass true to skip PeerJSMode.cleanup() — the connection that just
+                // opened may itself be a PeerJS connection; destroying the Peer here
+                // (synchronously, inside dc.onopen) would set conn.open=false before
+                // the introduce message is sent, silently killing the handshake.
                 if (!document.getElementById('add-peer-modal').classList.contains('hidden')) {
-                    App.closeAddPeerModal();
+                    App.closeAddPeerModal(true);
                 }
                 break;
             case 'unresponsive':
@@ -328,7 +332,7 @@ const App = {
             App.displaySystemMessage(name + ' reconnected');
             // Close reconnect modal if open
             if (!document.getElementById('add-peer-modal').classList.contains('hidden')) {
-                App.closeAddPeerModal();
+                App.closeAddPeerModal(true);
             }
         } else {
             App._peerNames.set(peerId, name);
@@ -1081,12 +1085,12 @@ const App = {
         App._showModalStep('modal-home');
     },
 
-    closeAddPeerModal() {
+    closeAddPeerModal(skipPeerJSCleanup) {
         const modal = document.getElementById('add-peer-modal');
         modal.classList.add('hidden');
         QR.stopDisplay();
         QR.stopScanner();
-        PeerJSMode.cleanup();
+        if (!skipPeerJSCleanup) PeerJSMode.cleanup();
         App._currentModalConnId = null;
         App._peerjsReturnStep = null;
         // Reset header text
